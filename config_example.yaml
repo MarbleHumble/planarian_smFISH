@@ -27,3 +27,4 @@ plotExactSpot: false
 exactSpotSize: 2
 plotSpotLabel: false
 plot_spot_size: 4
+resultsFolderName: results
