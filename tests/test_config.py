@@ -14,7 +14,7 @@ for k, v in config.items():
     print(f"{k}: {v}")
 
 # Optional: run a small test function (dummy spot detection)
-from functions.spot_detection import detect_spots_dummy  # create a dummy function for testing
+import os
 from functions.io_utils import create_folder_in_same_directory
 
 results_folder = create_folder_in_same_directory(config["smFISHChannelPath"], config["resultsFolderName"])
