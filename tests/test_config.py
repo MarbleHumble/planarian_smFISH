@@ -1,11 +1,18 @@
-# run_server.py
-
 from functions.io_utils import load_config
+from pathlib import Path
+import os
 
-config = load_config("../config_example.yaml")  # relative path to YAML
+# Optional: ensure current working directory is project root
+os.chdir(Path(__file__).resolve().parent.parent)
 
-print("smFISHChannelPath:", config["smFISHChannelPath"])
-print("voxel_size:", config["voxel_size"])
-print("experimentAverageThreshold:", config["experimentAverageThreshold"])
-print("saveSpotInformation:", config["saveSpotInformation"])
-print("plotSpotLabel:", config["plotSpotLabel"])
+# Load test config
+config = load_config("config_example.yaml")
+
+# Print all parameters for verification
+print("Loaded config parameters:")
+for k, v in config.items():
+    print(f"{k}: {v}")
+
+# Optional: run a small test function (dummy spot detection)
+from functions.spot_detection import detect_spots_dummy  # create a dummy function for testing
+detect_spots_dummy(config)
