@@ -1,13 +1,17 @@
 v4.00 development blog. 
 Developer - Elias (Qingxu) Guan from Northwestern University, Christian Petersen lab. 
-planarian_smFISH/smFISH_for_planarian_v4 
-│── main.py               # Entry point (run the pipeline)
-│── requirements.txt      # List of dependencies
-│── functions/            # Folder for helper modules
-│   ├── __init__.py       # Makes it a package
-│   ├── io_utils.py       # File loading/saving
-│   ├── preprocessing.py  # Filtering, normalization
-│   ├── spot_detection.py # smFISH spot finding
-│   ├── visualization.py  # Plotting results
-│── data/                 # (Optional) raw input data
-│── results/    
+planarian_smFISH/
+│── main.py                 # Entry point
+│── run_server.py           # For batch execution on server
+│── gui_main.py             # PyQt GUI for local small images
+│── config_example.yaml     # Example parameters for server
+│── requirements.txt
+│── functions/
+│   ├── __init__.py
+│   ├── io_utils.py
+│   ├── preprocessing.py
+│   ├── spot_detection.py
+│   ├── visualization.py
+│   └── utils.py           # Helper functions, logging, etc.
+│── data/
+│── results/

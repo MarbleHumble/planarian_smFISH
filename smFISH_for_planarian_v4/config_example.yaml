@@ -1,0 +1,29 @@
+# config.yaml
+controlImage: false
+controlPath: null
+smFISHChannelPath: "/scratch/qgs8612/worm1/Image1_565.tif"
+controlAverageThreshold: null
+experimentAverageThreshold: 10
+minimal_distance: [2, 2, 2]
+kernel_size: [1, 1.7, 1.7]
+control_voxel_size: [361, 75, 75]
+voxel_size: [361, 75, 75]
+spot_size: [600, 300, 300]
+decomposition_thresh: [0.7, 1, 5]
+min_spots_for_clusters: 4
+radius_for_spots: 250
+plot_spot_size: 4
+
+# --- Decomposition / Clustering ---
+decomposition_thresh: [0.7, 1, 5]
+min_spots_for_clusters: 4
+radius_for_spots: 250
+
+# --- Plotting / Advanced settings ---
+spotsRadiusDetection: false
+saveSpotInformation: true
+plotInnerCircle: false
+plotExactSpot: false
+exactSpotSize: 2
+plotSpotLabel: false
+plot_spot_size: 4
