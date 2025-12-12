@@ -10,7 +10,7 @@
 # Load environment
 module purge all
 module load python-anaconda3/2019.10
-source activate stardist-env
+source activate bigfish-env
 
 # Confirm Python version
 python --version
