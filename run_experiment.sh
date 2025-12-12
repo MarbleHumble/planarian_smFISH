@@ -10,7 +10,7 @@
 # Load environment
 module purge all
 module load python-anaconda3/2019.10
-source activate bigfish-env
+source activate smfish_env
 
 # Confirm Python version
 python --version
