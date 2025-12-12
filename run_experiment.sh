@@ -8,12 +8,12 @@
 #SBATCH --output=EG12122501output.log
 
 # Load environment
-module purge all
-module load python-anaconda3/2019.10
-source activate smfish_env
+source ~/.bashrc               # loads conda
+conda activate smfish_env
 
-# Confirm Python version
+which python
 python --version
+
 
 # Run your script
 python /home/qgs8612/planarian_smFISH/run_server.py --config /home/qgs8612/planarian_smFISH/config.yaml
