@@ -14,11 +14,12 @@
 # -----------------------------
 module load python-miniconda3
 
-# Ensure conda works in non-interactive shell
-source /home/qgs8612/.conda/etc/profile.d/conda.sh
-conda activate smfish_env
+# Initialize conda for non-interactive shell
+source $(conda info --base)/etc/profile.d/conda.sh
+conda activate /home/qgs8612/.conda/envs/smfish_env
+
 # -----------------------------
-# GPU diagnostics (optional but recommended)
+# GPU diagnostics
 # -----------------------------
 echo "===== NVIDIA-SMI ====="
 nvidia-smi
