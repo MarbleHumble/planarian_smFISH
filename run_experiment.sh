@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --mem=32
 #SBATCH --job-name=EG121225GPU
-#SBATCH --output=EG12122501outputGPU.log
+#SBATCH --output=EG_new_GPU_LoG_test_output.log
 
 # Load environment
 $ module load python-miniconda3
