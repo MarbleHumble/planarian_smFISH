@@ -15,9 +15,8 @@
 module load python-miniconda3
 
 # Ensure conda works in non-interactive shell
-source ~/.bashrc         # Loads conda initialization
+source /home/qgs8612/.conda/etc/profile.d/conda.sh
 conda activate smfish_env
-
 # -----------------------------
 # GPU diagnostics (optional but recommended)
 # -----------------------------
