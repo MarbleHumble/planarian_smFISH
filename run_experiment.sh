@@ -6,8 +6,8 @@
 #SBATCH --time=08:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=8
-#SBATCH --job-name=EG121225GPU
-#SBATCH --output=EG_new_GPU_LoG_test_output.log
+#SBATCH --job-name=EG121225GPUfastlog
+#SBATCH --output=EG_fastLoG_GPU_LoG_test_output.log
 
 module load python-miniconda3
 

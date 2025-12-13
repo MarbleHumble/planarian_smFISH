@@ -6,12 +6,12 @@ Author: Elias Guan
 
 import os
 import argparse
-import torch  # <-- import torch for GPU detection
-from functions.io_utils import load_config, create_folder_in_same_directory
-from functions.spot_detection import detect_spots_from_config
+import torch
 import numpy as np
 from tifffile import imwrite
-
+from functions.io_utils import load_config, create_folder_in_same_directory
+from functions.spot_detection import detect_spots_from_config
+from functions.gpu_smfish import plot_spot_example  # plot helper
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -46,13 +46,8 @@ def main():
     # -------------------------------------------------
     # Step 1: Load config.yaml
     # -------------------------------------------------
-    if args.config is None:
-        config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
-        print(f"No config provided. Using default: {config_path}")
-    else:
-        config_path = args.config
-        print(f"Using config provided via command line: {config_path}")
-
+    config_path = args.config if args.config else os.path.join(os.path.dirname(__file__), "config.yaml")
+    print(f"Using config: {config_path}")
     config = load_config(config_path)
 
     print("\nLoaded config parameters:")
@@ -73,18 +68,13 @@ def main():
     npy_folder = os.path.join(results_folder, "npy")
     tiff_folder = os.path.join(results_folder, "tiff")
     plots_folder = os.path.join(results_folder, "plots")
-
     for p in [npy_folder, tiff_folder, plots_folder]:
         os.makedirs(p, exist_ok=True)
-
-    print("Created subfolders:")
-    print(f"  {npy_folder}")
-    print(f"  {tiff_folder}")
-    print(f"  {plots_folder}")
+    print(f"Created subfolders: {npy_folder}, {tiff_folder}, {plots_folder}")
     print("--------------------------------------------------")
 
     # -------------------------------------------------
-    # Step 4: Run spot detection (force GPU)
+    # Step 4: Run spot detection
     # -------------------------------------------------
     spots_exp, threshold_used, img_log_exp = detect_spots_from_config(
         config,
@@ -95,20 +85,41 @@ def main():
     # Step 5: Save outputs
     # -------------------------------------------------
     np.save(os.path.join(npy_folder, "spots_exp.npy"), spots_exp)
-
     imwrite(
         os.path.join(tiff_folder, "smFISH_LoG_filtered.tif"),
         img_log_exp,
         photometric="minisblack"
     )
 
-    print("\n--------------------------------------------------")
     print(f"Experiment spots detected: {len(spots_exp)}")
     print(f"Threshold used: {threshold_used}")
-    print("Saved results:")
-    print(f"  NPY folder:   {npy_folder}")
-    print(f"  TIFF folder:  {tiff_folder}")
-    print(f"  Plots folder: {plots_folder}")
+
+    # -------------------------------------------------
+    # Step 6: Plot examples if spotsRadiusDetection=True
+    # -------------------------------------------------
+    if config.get("spotsRadiusDetection", False) and len(spots_exp) > 0:
+        # First Gaussian spot
+        plot_spot_example(
+            img_log_exp,
+            spots_exp[0],
+            gaussian_fit=True,
+            save_path=os.path.join(plots_folder, "spot_example_gaussian.png")
+        )
+        print(f"Saved Gaussian spot example: spot_example_gaussian.png")
+
+        # Simulate a discarded/non-Gaussian spot
+        if len(spots_exp) > 1:
+            bad_spot = spots_exp[1] + 5  # small offset
+            plot_spot_example(
+                img_log_exp,
+                bad_spot,
+                gaussian_fit=False,
+                save_path=os.path.join(plots_folder, "spot_example_non_gaussian.png")
+            )
+            print(f"Saved non-Gaussian spot example: spot_example_non_gaussian.png")
+
+    print("--------------------------------------------------")
+    print(f"Results saved in folders:\n  NPY: {npy_folder}\n  TIFF: {tiff_folder}\n  Plots: {plots_folder}")
     print("--------------------------------------------------")
 
 
