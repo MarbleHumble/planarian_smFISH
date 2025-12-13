@@ -9,9 +9,10 @@ import argparse
 import torch
 import numpy as np
 from tifffile import imwrite
+
 from functions.io_utils import load_config, create_folder_in_same_directory
 from functions.spot_detection import detect_spots_from_config
-from functions.gpu_smfish import plot_spot_example  # plot helper
+from functions.visualization import plot_spot_example  # 3D/2D spot plotting
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -34,7 +35,7 @@ def main():
     args = parse_arguments()
 
     # -------------------------------------------------
-    # Step 0.5: Force GPU usage if available
+    # Step 0.5: GPU detection
     # -------------------------------------------------
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -63,13 +64,13 @@ def main():
     print(f"Main results folder: {results_folder}")
 
     # -------------------------------------------------
-    # Step 3: Create subfolders inside results/
+    # Step 3: Create subfolders
     # -------------------------------------------------
     npy_folder = os.path.join(results_folder, "npy")
     tiff_folder = os.path.join(results_folder, "tiff")
     plots_folder = os.path.join(results_folder, "plots")
-    for p in [npy_folder, tiff_folder, plots_folder]:
-        os.makedirs(p, exist_ok=True)
+    for folder in [npy_folder, tiff_folder, plots_folder]:
+        os.makedirs(folder, exist_ok=True)
     print(f"Created subfolders: {npy_folder}, {tiff_folder}, {plots_folder}")
     print("--------------------------------------------------")
 
@@ -98,7 +99,7 @@ def main():
     # Step 6: Plot examples if spotsRadiusDetection=True
     # -------------------------------------------------
     if config.get("spotsRadiusDetection", False) and len(spots_exp) > 0:
-        # First Gaussian spot
+        # Gaussian spot example
         plot_spot_example(
             img_log_exp,
             spots_exp[0],
@@ -107,9 +108,9 @@ def main():
         )
         print(f"Saved Gaussian spot example: spot_example_gaussian.png")
 
-        # Simulate a discarded/non-Gaussian spot
+        # Non-Gaussian spot example
         if len(spots_exp) > 1:
-            bad_spot = spots_exp[1] + 5  # small offset
+            bad_spot = spots_exp[1] + 5  # small offset to simulate non-Gaussian
             plot_spot_example(
                 img_log_exp,
                 bad_spot,
