@@ -28,3 +28,5 @@ exactSpotSize: 2
 plotSpotLabel: false
 plot_spot_size: 4
 results_folder: results
+use_gpu: false
+gpu_device: cuda

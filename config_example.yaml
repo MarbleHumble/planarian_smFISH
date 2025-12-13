@@ -14,6 +14,7 @@ min_spots_for_clusters: 4
 radius_for_spots: 250
 plot_spot_size: 4
 
+
 # --- Decomposition / Clustering ---
 decomposition_thresh: [0.7, 1, 5]
 min_spots_for_clusters: 4
@@ -28,3 +29,5 @@ exactSpotSize: 2
 plotSpotLabel: false
 plot_spot_size: 4
 results_folder: results
+use_gpu: false
+gpu_device: cuda
