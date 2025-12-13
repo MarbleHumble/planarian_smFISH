@@ -15,7 +15,6 @@ import torch.nn.functional as F
 import numpy as np
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
-import os
 
 # -----------------------------
 # Gaussian / LoG utilities
@@ -64,7 +63,8 @@ def filter_gaussian_spots(img, coords, radius, expected_sigma, r2_threshold=0.8)
     """Keep only spots that fit a 3D Gaussian, compute sum intensities and radii."""
     def gaussian_3d(coords, amp, z0, y0, x0, sz, sy, sx):
         z, y, x = coords
-        return amp * np.exp(-((z-z0)**2/(2*sz**2)+(y-y0)**2/(2*sy**2)+(x-x0)**2/(2*sx**2))).ravel())
+        gauss = amp * np.exp(-((z-z0)**2/(2*sz**2) + (y-y0)**2/(2*sy**2) + (x-x0)**2/(2*sx**2)))
+        return gauss.ravel()
 
     kept_coords, sum_intensities, radii = [], [], []
     Z,Y,X = img.shape
@@ -79,7 +79,7 @@ def filter_gaussian_spots(img, coords, radius, expected_sigma, r2_threshold=0.8)
         try:
             p0 = [sub.max(), sub.shape[0]//2, sub.shape[1]//2, sub.shape[2]//2, *expected_sigma]
             popt,_ = curve_fit(gaussian_3d, (zz,yy,xx), sub.ravel(), p0=p0)
-            residuals = sub.ravel()-gaussian_3d((zz,yy,xx),*popt)
+            residuals = sub.ravel() - gaussian_3d((zz,yy,xx), *popt)
             ss_res = np.sum(residuals**2)
             ss_tot = np.sum((sub.ravel()-sub.mean())**2)
             r2 = 1 - ss_res/ss_tot
@@ -125,10 +125,8 @@ def detect_spots_gpu(
 # -----------------------------
 # Spot visualization helper
 # -----------------------------
-def plot_spot_example(img, coord, gaussian_fit=True, radius=2, expected_sigma=[1,1,1], save_path="spot_example.png"):
-    """
-    Plot 2D slices (XY, XZ, YZ) of a spot with optional Gaussian fit.
-    """
+def plot_spot_example(img, coord, gaussian_fit=True, radius=2, save_path="spot_example.png"):
+    """Plot 2D slices (XY, XZ, YZ) of a spot with optional Gaussian fit."""
     z,y,x = coord
     Z,Y,X = img.shape
     z1,z2 = max(0,z-radius), min(Z,z+radius+1)
