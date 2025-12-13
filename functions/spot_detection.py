@@ -224,9 +224,11 @@ def detect_spots_from_config(
       - use_gpu: false -> Big-FISH CPU (default)
 
     Returns:
-        spots_exp (np.ndarray)
-        exp_threshold_used (float)
-        img_log_exp (np.ndarray)
+        spots_exp (np.ndarray): coordinates of detected spots
+        exp_threshold_used (float): threshold used for detection
+        img_log_exp (np.ndarray): LoG-filtered image
+        sum_intensities (np.ndarray or None): sum intensity per spot
+        radii (np.ndarray or None): spot radius in z,y,x per spot (if spotsRadiusDetection=True)
     """
 
     import os
@@ -245,10 +247,7 @@ def detect_spots_from_config(
             use_gpu = False
 
     if use_gpu:
-        from functions.gpu_smfish import (
-            detect_spots_gpu,
-            set_max_performance,
-        )
+        from functions.gpu_smfish import detect_spots_gpu, set_max_performance
         set_max_performance()
         print("smFISH backend: GPU")
     else:
@@ -259,6 +258,7 @@ def detect_spots_from_config(
     from .spot_detection import (
         control_peak_intensities,
         compute_control_threshold_from_peaks,
+        find_spots_around,
     )
 
     # ------------------------------
@@ -311,14 +311,22 @@ def detect_spots_from_config(
     # ------------------------------
     # Step 4 — Spot detection
     # ------------------------------
+    compute_radii = bool(config.get("spotsRadiusDetection", False))
+    sum_intensities = None
+    radii = None
+
     if use_gpu:
         spots_exp, exp_threshold_used, img_log_exp = detect_spots_gpu(
             image_np=img_exp,
             sigma=tuple(config["kernel_size"]),
             min_distance=tuple(config["minimal_distance"]),
             threshold=threshold_to_use,
-            device="cuda",
+            device=config.get("gpu_device", "cuda"),
         )
+        if compute_radii:
+            # Optional: placeholder, GPU version can implement radii/intensity computation later
+            sum_intensities = np.zeros(len(spots_exp))
+            radii = np.zeros((len(spots_exp), 3))
 
     else:
         spots_exp, exp_threshold_used = bf_detect_spots(
@@ -330,8 +338,20 @@ def detect_spots_from_config(
             log_kernel_size=config["kernel_size"],
             minimum_distance=config["minimal_distance"],
         )
-
         img_log_exp = log_filter(img_exp, config["kernel_size"])
+
+        if compute_radii:
+            sum_intensities = []
+            radii = []
+            for coord in spots_exp:
+                spot_voxels = find_spots_around(coord, img_log_exp)
+                sum_intensities.append(np.sum(img_exp[tuple(spot_voxels.T)]))  # raw intensity
+                z_span = spot_voxels[:, 0].max() - spot_voxels[:, 0].min() + 1
+                y_span = spot_voxels[:, 1].max() - spot_voxels[:, 1].min() + 1
+                x_span = spot_voxels[:, 2].max() - spot_voxels[:, 2].min() + 1
+                radii.append([z_span, y_span, x_span])
+            sum_intensities = np.array(sum_intensities)
+            radii = np.array(radii)
 
     print(
         f"Detected {len(spots_exp)} experiment spots "
@@ -346,12 +366,15 @@ def detect_spots_from_config(
         img_log_exp,
         photometric="minisblack",
     )
-    np.save(
-        os.path.join(results_folder, "experiment_spots.npy"),
-        spots_exp,
-    )
+    np.save(os.path.join(results_folder, "experiment_spots.npy"), spots_exp)
+    if compute_radii:
+        np.save(os.path.join(results_folder, "experiment_spot_intensity.npy"), sum_intensities)
+        np.save(os.path.join(results_folder, "experiment_spot_radii.npy"), radii)
 
     print("Saved experiment LoG TIFF + NPY.")
+    if compute_radii:
+        print("Saved spot intensity and radii.")
 
-    return spots_exp, exp_threshold_used, img_log_exp
+    return spots_exp, exp_threshold_used, img_log_exp, sum_intensities, radii
+
 

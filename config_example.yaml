@@ -11,7 +11,6 @@ voxel_size: [361, 75, 75]
 spot_size: [600, 300, 300]
 decomposition_thresh: [0.7, 1, 5]
 min_spots_for_clusters: 4
-radius_for_spots: 250
 plot_spot_size: 4
 
 
