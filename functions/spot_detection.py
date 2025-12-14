@@ -216,7 +216,10 @@ def detect_spots_from_config(
     results_folder=None,
 ):
     """
-    smFISH spot detection with optional GPU acceleration.
+    smFISH spot detection with optional GPU acceleration using:
+        1) LoG minima on GPU
+        2) Raj lab-style plateau thresholding
+        3) Optional Gaussian fitting filter
 
     Returns:
         spots_exp (np.ndarray): spot coordinates (N,3)
@@ -233,7 +236,7 @@ def detect_spots_from_config(
     from tifffile import imread, imwrite
 
     # ------------------------------
-    # Defaults (IMPORTANT)
+    # Defaults
     # ------------------------------
     exp_threshold_used = None
     sum_intensities = None
@@ -253,9 +256,9 @@ def detect_spots_from_config(
             use_gpu = False
 
     if use_gpu:
-        from functions.gpu_smfish import detect_spots_gpu, set_max_performance
+        from functions.gpu_smfish import detect_spots_gpu_full, set_max_performance
         set_max_performance()
-        print("smFISH backend: GPU")
+        print("smFISH backend: GPU (Raj + Gaussian)")
     else:
         from bigfish.stack import log_filter
         from bigfish.detection import detect_spots as bf_detect_spots
@@ -300,25 +303,25 @@ def detect_spots_from_config(
     compute_radii = bool(config.get("spotsRadiusDetection", False))
 
     # ------------------------------
-    # GPU DETECTION
+    # GPU DETECTION (Raj method + Gaussian filter)
     # ------------------------------
     if use_gpu:
         (
             spots_exp,
+            exp_threshold_used,
             img_log_exp,
             sum_intensities,
             radii,
             good_coords,
             bad_coords,
-        ) = detect_spots_gpu(
+        ) = detect_spots_gpu_full(
             image_np=img_exp,
             sigma=tuple(config["kernel_size"]),
             min_distance=tuple(config["minimal_distance"]),
             gaussian_radius=int(config.get("plot_spot_size", 2)),
-            spots_radius_detection=compute_radii,
-            gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 0.1)),
-            intensity_percentile_cutoff=float(config.get("intensity_percentile_cutoff", 99)),
+            gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 1.0)),
             r2_threshold=float(config.get("r2_threshold", 0.8)),
+            intensity_percentile_cutoff=float(config.get("intensity_percentile_cutoff", 99)),
             random_seed=int(config.get("random_seed", 0)),
             device=config.get("gpu_device", "cuda"),
         )
@@ -351,16 +354,13 @@ def detect_spots_from_config(
         if compute_radii and len(spots_exp) > 0:
             sum_intensities = []
             radii = []
-
             for coord in spots_exp:
                 voxels = find_spots_around(coord, img_log_exp)
                 sum_intensities.append(np.sum(img_exp[tuple(voxels.T)]))
-
                 z_span = voxels[:, 0].ptp() + 1
                 y_span = voxels[:, 1].ptp() + 1
                 x_span = voxels[:, 2].ptp() + 1
                 radii.append([z_span, y_span, x_span])
-
             sum_intensities = np.asarray(sum_intensities)
             radii = np.asarray(radii)
 
@@ -388,9 +388,6 @@ def detect_spots_from_config(
 
     print("Saved experiment results.")
 
-    # ------------------------------
-    # CRITICAL: consistent return
-    # ------------------------------
     return (
         spots_exp,
         exp_threshold_used,
