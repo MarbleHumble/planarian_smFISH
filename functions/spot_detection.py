@@ -213,7 +213,6 @@ def compute_control_threshold_from_peaks(peak_values, percentile=99):
 def detect_spots_from_config(
     config,
     img_path=None,
-    threshold=None,
     results_folder=None,
 ):
     """
@@ -243,10 +242,7 @@ def detect_spots_from_config(
             use_gpu = False
 
     if use_gpu:
-        from functions.gpu_smfish import (
-            detect_spots_gpu,
-            set_max_performance,
-        )
+        from functions.gpu_smfish import detect_spots_gpu, set_max_performance
         set_max_performance()
         print("smFISH backend: GPU")
     else:
@@ -271,7 +267,7 @@ def detect_spots_from_config(
     os.makedirs(results_folder, exist_ok=True)
 
     # ------------------------------
-    # Control threshold
+    # Control threshold (optional)
     # ------------------------------
     control_threshold = None
     if config.get("controlImage") and config.get("controlPath"):
@@ -279,9 +275,7 @@ def detect_spots_from_config(
         _, peak_values, _ = control_peak_intensities(
             config["controlPath"], config, results_folder
         )
-        control_threshold = compute_control_threshold_from_peaks(
-            peak_values, percentile=99
-        )
+        control_threshold = compute_control_threshold_from_peaks(peak_values, percentile=99)
         print(f"Control-derived threshold: {control_threshold}")
 
     # ------------------------------
@@ -291,52 +285,36 @@ def detect_spots_from_config(
     print(f"Loaded experiment image: {img_exp.shape}")
 
     # ------------------------------
-    # Decide threshold
-    # ------------------------------
-    if threshold is not None:
-        threshold_to_use = threshold
-        print(f"Manual threshold override: {threshold_to_use}")
-    elif control_threshold is not None:
-        threshold_to_use = control_threshold
-        print("Using control-based threshold.")
-    elif config.get("experimentThreshold") is not None:
-        threshold_to_use = config["experimentThreshold"]
-        print(f"Using experimentThreshold from config: {threshold_to_use}")
-    else:
-        threshold_to_use = None
-        print("Using automatic threshold.")
-
-    # ------------------------------
     # Spot detection
     # ------------------------------
     compute_radii = bool(config.get("spotsRadiusDetection", False))
 
     if use_gpu:
-        (
-            spots_exp,
-            img_log_exp,
-            sum_intensities,
-            radii,
-            good_coords,
-            bad_coords,
-        ) = detect_spots_gpu(
+        # GPU mode automatically computes threshold internally
+        spots_exp, img_log_exp, sum_intensities, radii, good_coords, bad_coords = detect_spots_gpu(
             image_np=img_exp,
             sigma=tuple(config["kernel_size"]),
             min_distance=tuple(config["minimal_distance"]),
-            threshold=threshold_to_use,
             gaussian_radius=int(config.get("plot_spot_size", 2)),
             spots_radius_detection=compute_radii,
             gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 0.1)),
-            intensity_percentile_cutoff=float(
-                config.get("intensity_percentile_cutoff", 99)
-            ),
+            intensity_percentile_cutoff=float(config.get("intensity_percentile_cutoff", 99)),
             r2_threshold=float(config.get("r2_threshold", 0.8)),
             random_seed=int(config.get("random_seed", 0)),
             device=config.get("gpu_device", "cuda"),
         )
-        exp_threshold_used = threshold_to_use
+        exp_threshold_used = None  # threshold handled internally in GPU
 
     else:
+        # CPU (Big-FISH) mode may use control or config threshold
+        if control_threshold is not None:
+            threshold_to_use = control_threshold
+        elif config.get("experimentThreshold") is not None:
+            threshold_to_use = config["experimentThreshold"]
+        else:
+            threshold_to_use = None
+        print(f"Using threshold for CPU detection: {threshold_to_use}")
+
         spots_exp, exp_threshold_used = bf_detect_spots(
             images=img_exp,
             threshold=threshold_to_use,
@@ -363,10 +341,7 @@ def detect_spots_from_config(
             sum_intensities = np.asarray(sum_intensities)
             radii = np.asarray(radii)
 
-    print(
-        f"Detected {len(spots_exp)} experiment spots "
-        f"(threshold={exp_threshold_used})"
-    )
+    print(f"Detected {len(spots_exp)} experiment spots")
 
     # ------------------------------
     # Save outputs
@@ -379,18 +354,13 @@ def detect_spots_from_config(
     np.save(os.path.join(results_folder, "experiment_spots.npy"), spots_exp)
 
     if compute_radii:
-        np.save(
-            os.path.join(results_folder, "experiment_spot_intensity.npy"),
-            sum_intensities,
-        )
-        np.save(
-            os.path.join(results_folder, "experiment_spot_radii.npy"),
-            radii,
-        )
+        np.save(os.path.join(results_folder, "experiment_spot_intensity.npy"), sum_intensities)
+        np.save(os.path.join(results_folder, "experiment_spot_radii.npy"), radii)
 
     print("Saved experiment results.")
 
     return spots_exp, exp_threshold_used, img_log_exp, sum_intensities, radii
+
 
 
 
