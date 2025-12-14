@@ -181,7 +181,7 @@ def detect_spots_gpu(
     device="cuda",
 ):
     """
-    GPU-native smFISH spot detection.
+    GPU-native smFISH spot detection (memory-safe for large 3D images).
 
     Returns:
         coords (np.ndarray): final spot coordinates
@@ -202,13 +202,22 @@ def detect_spots_gpu(
     log_t = torch.from_numpy(log_img).to(device)
 
     # -------------------------
-    # Automatic threshold if None
+    # Automatic threshold if None (memory-safe)
     # -------------------------
     if threshold is None:
-        neg_vals = log_t[log_t < 0]
+        # Move negative LoG values to CPU
+        neg_vals = log_t[log_t < 0].cpu()
         if neg_vals.numel() == 0:
             raise RuntimeError("No negative LoG values found for automatic thresholding.")
-        threshold = torch.quantile(neg_vals, 0.999).item()  # default auto_percentile
+
+        # Subsample if too many values
+        max_samples = int(1e6)
+        if neg_vals.numel() > max_samples:
+            idx = torch.randperm(neg_vals.numel())[:max_samples]
+            neg_vals = neg_vals[idx]
+
+        # Compute quantile for threshold
+        threshold = torch.quantile(neg_vals, 0.999).item()
 
     # -------------------------
     # Thresholding
