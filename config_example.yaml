@@ -18,7 +18,7 @@ plot_spot_size: 4
 
 
 # Gaussian fitting
-gaussian_fit_fraction: 0.1        # fraction of spots to Gaussian-fit
+gaussian_fit_fraction: 1.0        # fraction of spots to Gaussian-fit
 intensity_percentile_cutoff: 1.0  # percentile of GOOD spots (lower bound)
 random_seed: 0                    # reproducibility
 

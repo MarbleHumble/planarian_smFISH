@@ -108,13 +108,20 @@ def main():
         img_log_exp,
         sum_intensities,
         radii,
+        good_c,
+        bad_c
     ) = detect_spots_from_config(
         config,
         results_folder=results_folder,
     )
-    t_detection = time.perf_counter() - t0
+    t_detection = time.perf_counter()
 
-    print(f"Detected {len(spots_exp)} spots")
+    # Count filtered bad spots
+    n_total = (len(spots_exp) + len(bad_c)) if bad_c is not None else len(spots_exp)
+    n_bad = len(bad_c) if bad_c is not None else 0
+    print(f"Detected {len(spots_exp)} good spots")
+    print(f"Filtered out {n_bad} bad spots")
+    print(f"Total candidate spots: {n_total}")
     print(f"Threshold used: {threshold_used}")
 
     # -------------------------------------------------
