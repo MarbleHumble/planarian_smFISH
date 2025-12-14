@@ -210,15 +210,11 @@ def compute_control_threshold_from_peaks(peak_values, percentile=99):
     thr = float(np.percentile(peak_values, percentile))
     return thr
 
-def detect_spots_from_config(
-    config,
-    img_path=None,
-    results_folder=None,
-):
+def detect_spots_from_config(config, img_path=None, results_folder=None):
     """
     smFISH spot detection with optional GPU acceleration using:
         1) LoG minima on GPU
-        2) Raj lab-style plateau thresholding
+        2) Raj lab-style plateau thresholding based on 3D sum intensity
         3) Optional Gaussian fitting filter
 
     Returns:
@@ -248,7 +244,6 @@ def detect_spots_from_config(
     # Backend selection
     # ------------------------------
     use_gpu = bool(config.get("use_gpu", False))
-
     if use_gpu:
         import torch
         if not torch.cuda.is_available():
@@ -286,12 +281,8 @@ def detect_spots_from_config(
     control_threshold = None
     if config.get("controlImage") and config.get("controlPath"):
         print("Computing control-image threshold...")
-        _, peak_values, _ = control_peak_intensities(
-            config["controlPath"], config, results_folder
-        )
-        control_threshold = compute_control_threshold_from_peaks(
-            peak_values, percentile=99
-        )
+        _, peak_values, _ = control_peak_intensities(config["controlPath"], config, results_folder)
+        control_threshold = compute_control_threshold_from_peaks(peak_values, percentile=99)
         print(f"Control-derived threshold: {control_threshold}")
 
     # ------------------------------
@@ -299,11 +290,10 @@ def detect_spots_from_config(
     # ------------------------------
     img_exp = imread(img_path)
     print(f"Loaded experiment image: {img_exp.shape}")
-
     compute_radii = bool(config.get("spotsRadiusDetection", False))
 
     # ------------------------------
-    # GPU DETECTION (Raj method + Gaussian filter)
+    # GPU DETECTION
     # ------------------------------
     if use_gpu:
         (
@@ -321,7 +311,6 @@ def detect_spots_from_config(
             gaussian_radius=int(config.get("plot_spot_size", 2)),
             gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 1.0)),
             r2_threshold=float(config.get("r2_threshold", 0.8)),
-            intensity_percentile_cutoff=float(config.get("intensity_percentile_cutoff", 99)),
             random_seed=int(config.get("random_seed", 0)),
             device=config.get("gpu_device", "cuda"),
         )
@@ -330,13 +319,7 @@ def detect_spots_from_config(
     # CPU (Big-FISH) DETECTION
     # ------------------------------
     else:
-        if control_threshold is not None:
-            threshold_to_use = control_threshold
-        elif config.get("experimentThreshold") is not None:
-            threshold_to_use = config["experimentThreshold"]
-        else:
-            threshold_to_use = None
-
+        threshold_to_use = control_threshold if control_threshold is not None else config.get("experimentThreshold", None)
         print(f"Using threshold for CPU detection: {threshold_to_use}")
 
         spots_exp, exp_threshold_used = bf_detect_spots(
@@ -369,34 +352,16 @@ def detect_spots_from_config(
     # ------------------------------
     # Save outputs
     # ------------------------------
-    imwrite(
-        os.path.join(results_folder, "experiment_LoG_filtered.tif"),
-        img_log_exp,
-        photometric="minisblack",
-    )
+    imwrite(os.path.join(results_folder, "experiment_LoG_filtered.tif"), img_log_exp, photometric="minisblack")
     np.save(os.path.join(results_folder, "experiment_spots.npy"), spots_exp)
 
     if compute_radii and sum_intensities is not None:
-        np.save(
-            os.path.join(results_folder, "experiment_spot_intensity.npy"),
-            sum_intensities,
-        )
-        np.save(
-            os.path.join(results_folder, "experiment_spot_radii.npy"),
-            radii,
-        )
+        np.save(os.path.join(results_folder, "experiment_spot_intensity.npy"), sum_intensities)
+        np.save(os.path.join(results_folder, "experiment_spot_radii.npy"), radii)
 
     print("Saved experiment results.")
 
-    return (
-        spots_exp,
-        exp_threshold_used,
-        img_log_exp,
-        sum_intensities,
-        radii,
-        good_coords,
-        bad_coords,
-    )
+    return spots_exp, exp_threshold_used, img_log_exp, sum_intensities, radii, good_coords, bad_coords
 
 
 

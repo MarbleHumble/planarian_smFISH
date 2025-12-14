@@ -49,7 +49,7 @@ def plot_elbow_curve(intensities, save_path):
 
 
 # -------------------------------------------------
-# Main
+# Main pipeline
 # -------------------------------------------------
 def main():
     t_start_total = time.perf_counter()
@@ -68,11 +68,9 @@ def main():
     # Step 1 — Load config.yaml
     t0 = time.perf_counter()
     config_path = args.config or os.path.join(os.path.dirname(__file__), "config.yaml")
-    print(f"Using config: {config_path}")
     config = load_config(config_path)
     t_config = time.perf_counter() - t0
-
-    print("\nLoaded config parameters:")
+    print(f"Using config: {config_path}\nLoaded config parameters:")
     for key, value in config.items():
         print(f"  {key}: {value}")
     print("--------------------------------------------------")
@@ -95,27 +93,19 @@ def main():
     print(f"Created subfolders:\n  NPY  : {npy_folder}\n  TIFF : {tiff_folder}\n  Plots: {plots_folder}")
     print("--------------------------------------------------")
 
-    # Step 4 — Spot detection (MAIN COMPUTE)
+    # Step 4 — Spot detection (GPU Raj + Gaussian or CPU fallback)
     t0 = time.perf_counter()
-    (
-        spots_exp,
-        threshold_used,
-        img_log_exp,
-        sum_intensities,
-        radii,
-        good_c,
-        bad_c
-    ) = detect_spots_from_config(
+    spots_exp, threshold_used, img_log_exp, sum_intensities, radii, good_c, bad_c = detect_spots_from_config(
         config,
-        results_folder=results_folder,
+        results_folder=results_folder
     )
     t_detection = time.perf_counter()
 
-    # Step 4b — Optional: elbow / plateau curve
+    # Step 4b — Optional: plot Raj-style elbow / plateau curve
     if sum_intensities is not None:
         plot_elbow_curve(sum_intensities, os.path.join(plots_folder, "elbow_curve.png"))
 
-    # Count filtered bad spots
+    # Step 4c — Spot counts
     n_total = (len(spots_exp) + len(bad_c)) if bad_c is not None else len(spots_exp)
     n_bad = len(bad_c) if bad_c is not None else 0
     print(f"Detected {len(spots_exp)} good spots")
@@ -133,10 +123,11 @@ def main():
     imwrite(os.path.join(tiff_folder, "smFISH_LoG_filtered.tif"), img_log_exp, photometric="minisblack")
     t_saving = time.perf_counter() - t0
 
-    # Step 6 — Plot examples
+    # Step 6 — Plot example spots
     t_plotting = 0.0
     if config.get("spotsRadiusDetection", False) and len(spots_exp) > 0:
         t0 = time.perf_counter()
+        # Plot a good Gaussian-like spot
         plot_spot_example(
             img_log_exp,
             good_c[0] if good_c is not None else spots_exp[0],
@@ -145,6 +136,7 @@ def main():
             radius=int(config.get("plot_spot_size", 2)),
             title="Gaussian-like spot"
         )
+        # Plot a filtered non-Gaussian spot
         if bad_c is not None and len(bad_c) > 0:
             plot_spot_example(
                 img_log_exp,
@@ -174,4 +166,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
