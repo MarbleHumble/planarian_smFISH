@@ -58,11 +58,7 @@ def main():
     # Step 1 — Load config.yaml
     # -------------------------------------------------
     t0 = time.perf_counter()
-    config_path = (
-        args.config
-        if args.config
-        else os.path.join(os.path.dirname(__file__), "config.yaml")
-    )
+    config_path = args.config or os.path.join(os.path.dirname(__file__), "config.yaml")
     print(f"Using config: {config_path}")
 
     config = load_config(config_path)
