@@ -1,9 +1,12 @@
 # config.yaml
+# File I/O
 controlImage: False
 controlPath: "/Users/eliasguan/Desktop/DL_210_data_analysis/testcontrol/control_0h_Incision_Image1_565.tif"
 smFISHChannelPath: "/Users/eliasguan/Desktop/DL_210_data_analysis/Example_Image_analysis/smallworm/below_the_eyes/worm1/565/Image1_565.tif"
+
+# Spot detection
 controlThreshold: null
-experimentThreshold: 10
+experimentThreshold: null
 minimal_distance: [2, 2, 2]
 kernel_size: [1, 1.7, 1.7]
 control_voxel_size: [361, 75, 75]
@@ -12,6 +15,12 @@ spot_size: [600, 300, 300]
 decomposition_thresh: [0.7, 1, 5]
 min_spots_for_clusters: 4
 plot_spot_size: 4
+
+
+# Gaussian fitting
+gaussian_fit_fraction: 0.1        # fraction of spots to Gaussian-fit
+intensity_percentile_cutoff: 1.0  # percentile of GOOD spots (lower bound)
+random_seed: 0                    # reproducibility
 
 
 # --- Decomposition / Clustering ---

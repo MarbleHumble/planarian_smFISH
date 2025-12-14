@@ -219,16 +219,12 @@ def detect_spots_from_config(
     """
     smFISH spot detection with optional GPU acceleration.
 
-    Backend selection:
-      - use_gpu: true  -> GPU smFISH (gpu_smfish.py)
-      - use_gpu: false -> Big-FISH CPU (default)
-
     Returns:
-        spots_exp (np.ndarray): coordinates of detected spots
-        exp_threshold_used (float): threshold used for detection
-        img_log_exp (np.ndarray): LoG-filtered image
-        sum_intensities (np.ndarray or None): sum intensity per spot
-        radii (np.ndarray or None): spot radius in z,y,x per spot (if spotsRadiusDetection=True)
+        spots_exp (np.ndarray): spot coordinates (N,3)
+        exp_threshold_used (float)
+        img_log_exp (np.ndarray)
+        sum_intensities (np.ndarray)
+        radii (np.ndarray)
     """
 
     import os
@@ -243,11 +239,14 @@ def detect_spots_from_config(
     if use_gpu:
         import torch
         if not torch.cuda.is_available():
-            print("WARNING: use_gpu=True but CUDA not available. Falling back to CPU.")
+            print("WARNING: CUDA unavailable, falling back to CPU.")
             use_gpu = False
 
     if use_gpu:
-        from functions.gpu_smfish import detect_spots_gpu, set_max_performance
+        from functions.gpu_smfish import (
+            detect_spots_gpu,
+            set_max_performance,
+        )
         set_max_performance()
         print("smFISH backend: GPU")
     else:
@@ -262,7 +261,7 @@ def detect_spots_from_config(
     )
 
     # ------------------------------
-    # Initialize paths
+    # Paths
     # ------------------------------
     if img_path is None:
         img_path = config["smFISHChannelPath"]
@@ -272,11 +271,11 @@ def detect_spots_from_config(
     os.makedirs(results_folder, exist_ok=True)
 
     # ------------------------------
-    # Step 1 — Control-image threshold
+    # Control threshold
     # ------------------------------
     control_threshold = None
     if config.get("controlImage") and config.get("controlPath"):
-        print("Running control image — computing centroid LoG peaks...")
+        print("Computing control-image threshold...")
         _, peak_values, _ = control_peak_intensities(
             config["controlPath"], config, results_folder
         )
@@ -286,15 +285,18 @@ def detect_spots_from_config(
         print(f"Control-derived threshold: {control_threshold}")
 
     # ------------------------------
-    # Step 2 — Load experiment image
+    # Load experiment image
     # ------------------------------
     img_exp = imread(img_path)
     print(f"Loaded experiment image: {img_exp.shape}")
 
     # ------------------------------
-    # Step 3 — Decide threshold
+    # Decide threshold
     # ------------------------------
-    if control_threshold is not None:
+    if threshold is not None:
+        threshold_to_use = threshold
+        print(f"Manual threshold override: {threshold_to_use}")
+    elif control_threshold is not None:
         threshold_to_use = control_threshold
         print("Using control-based threshold.")
     elif config.get("experimentThreshold") is not None:
@@ -304,29 +306,35 @@ def detect_spots_from_config(
         threshold_to_use = None
         print("Using automatic threshold.")
 
-    if threshold is not None:
-        threshold_to_use = threshold
-        print(f"Manual threshold override: {threshold_to_use}")
-
     # ------------------------------
-    # Step 4 — Spot detection
+    # Spot detection
     # ------------------------------
     compute_radii = bool(config.get("spotsRadiusDetection", False))
-    sum_intensities = None
-    radii = None
 
     if use_gpu:
-        spots_exp, exp_threshold_used, img_log_exp = detect_spots_gpu(
+        (
+            spots_exp,
+            img_log_exp,
+            sum_intensities,
+            radii,
+            good_coords,
+            bad_coords,
+        ) = detect_spots_gpu(
             image_np=img_exp,
             sigma=tuple(config["kernel_size"]),
             min_distance=tuple(config["minimal_distance"]),
             threshold=threshold_to_use,
+            gaussian_radius=int(config.get("plot_spot_size", 2)),
+            spots_radius_detection=compute_radii,
+            gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 0.1)),
+            intensity_percentile_cutoff=float(
+                config.get("intensity_percentile_cutoff", 99)
+            ),
+            r2_threshold=float(config.get("r2_threshold", 0.8)),
+            random_seed=int(config.get("random_seed", 0)),
             device=config.get("gpu_device", "cuda"),
         )
-        if compute_radii:
-            # Optional: placeholder, GPU version can implement radii/intensity computation later
-            sum_intensities = np.zeros(len(spots_exp))
-            radii = np.zeros((len(spots_exp), 3))
+        exp_threshold_used = threshold_to_use
 
     else:
         spots_exp, exp_threshold_used = bf_detect_spots(
@@ -338,20 +346,22 @@ def detect_spots_from_config(
             log_kernel_size=config["kernel_size"],
             minimum_distance=config["minimal_distance"],
         )
+
         img_log_exp = log_filter(img_exp, config["kernel_size"])
 
+        sum_intensities, radii = None, None
         if compute_radii:
             sum_intensities = []
             radii = []
             for coord in spots_exp:
-                spot_voxels = find_spots_around(coord, img_log_exp)
-                sum_intensities.append(np.sum(img_exp[tuple(spot_voxels.T)]))  # raw intensity
-                z_span = spot_voxels[:, 0].max() - spot_voxels[:, 0].min() + 1
-                y_span = spot_voxels[:, 1].max() - spot_voxels[:, 1].min() + 1
-                x_span = spot_voxels[:, 2].max() - spot_voxels[:, 2].min() + 1
+                voxels = find_spots_around(coord, img_log_exp)
+                sum_intensities.append(np.sum(img_exp[tuple(voxels.T)]))
+                z_span = voxels[:, 0].ptp() + 1
+                y_span = voxels[:, 1].ptp() + 1
+                x_span = voxels[:, 2].ptp() + 1
                 radii.append([z_span, y_span, x_span])
-            sum_intensities = np.array(sum_intensities)
-            radii = np.array(radii)
+            sum_intensities = np.asarray(sum_intensities)
+            radii = np.asarray(radii)
 
     print(
         f"Detected {len(spots_exp)} experiment spots "
@@ -359,7 +369,7 @@ def detect_spots_from_config(
     )
 
     # ------------------------------
-    # Step 5 — Save results
+    # Save outputs
     # ------------------------------
     imwrite(
         os.path.join(results_folder, "experiment_LoG_filtered.tif"),
@@ -367,14 +377,20 @@ def detect_spots_from_config(
         photometric="minisblack",
     )
     np.save(os.path.join(results_folder, "experiment_spots.npy"), spots_exp)
-    if compute_radii:
-        np.save(os.path.join(results_folder, "experiment_spot_intensity.npy"), sum_intensities)
-        np.save(os.path.join(results_folder, "experiment_spot_radii.npy"), radii)
 
-    print("Saved experiment LoG TIFF + NPY.")
     if compute_radii:
-        print("Saved spot intensity and radii.")
+        np.save(
+            os.path.join(results_folder, "experiment_spot_intensity.npy"),
+            sum_intensities,
+        )
+        np.save(
+            os.path.join(results_folder, "experiment_spot_radii.npy"),
+            radii,
+        )
+
+    print("Saved experiment results.")
 
     return spots_exp, exp_threshold_used, img_log_exp, sum_intensities, radii
+
 
 
