@@ -32,7 +32,7 @@ min_spots_for_clusters: 4
 radius_for_spots: 250
 
 # --- Plotting / Advanced settings ---
-spotsRadiusDetection: false
+spotsRadiusDetection: True
 saveSpotInformation: true
 plotInnerCircle: false
 plotExactSpot: false
@@ -40,5 +40,5 @@ exactSpotSize: 2
 plotSpotLabel: false
 plot_spot_size: 4
 results_folder: results
-use_gpu: false
+use_gpu: True
 gpu_device: cuda
