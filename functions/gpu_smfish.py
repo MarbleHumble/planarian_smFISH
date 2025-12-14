@@ -168,41 +168,20 @@ def gaussian_fit_subset(
 # Full detector
 # ============================================================
 def detect_spots_gpu(
-    image_np,
-    sigma,
-    min_distance,
-    threshold=None,
-    gaussian_radius=2,
-    spots_radius_detection=True,
-    gaussian_fit_fraction=0.1,
-    intensity_percentile_cutoff=99.0,
-    r2_threshold=0.8,
-    random_seed=0,
-    device="cuda",
+        image_np,
+        sigma,
+        min_distance,
+        threshold=None,
+        gaussian_radius=2,
+        spots_radius_detection=True,
+        gaussian_fit_fraction=0.1,
+        intensity_percentile_cutoff=99.0,
+        r2_threshold=0.8,
+        random_seed=0,
+        device="cuda",
 ):
     """
     GPU-native smFISH spot detection (memory-safe for large 3D images).
-
-    Parameters:
-        image_np (np.ndarray): 3D image array
-        sigma (tuple): LoG kernel size (z, y, x)
-        min_distance (tuple): minimal distance between spots (z, y, x)
-        threshold (float or None): manual threshold, if None it is computed automatically
-        gaussian_radius (int): radius for intensity/radius calculation
-        spots_radius_detection (bool): whether to compute radii and sum intensities
-        gaussian_fit_fraction (float): fraction of spots used for Gaussian fitting (0 disables)
-        intensity_percentile_cutoff (float): percentile cutoff of GOOD spots for filtering
-        r2_threshold (float): R^2 cutoff for Gaussian fitting
-        random_seed (int): random seed for Gaussian fit subset selection
-        device (str): GPU device ("cuda") or "cpu"
-
-    Returns:
-        coords (np.ndarray): final spot coordinates
-        log_img (np.ndarray): LoG filtered image
-        intensities (np.ndarray): spot intensities
-        radii (np.ndarray): spot radii (σz,σy,σx)
-        good_c (np.ndarray): coordinates used in Gaussian fit subset
-        bad_c (np.ndarray): coordinates not fitting Gaussian
     """
 
     import torch
@@ -215,16 +194,15 @@ def detect_spots_gpu(
     log_t = torch.from_numpy(log_img).to(device)
 
     # -------------------------
-    # Automatic threshold if None (memory-safe)
+    # Automatic threshold if None
     # -------------------------
     if threshold is None:
         neg_vals = log_t[log_t < 0].cpu()
         if neg_vals.numel() == 0:
-            raise RuntimeError("No negative LoG values found for automatic thresholding.")
+            raise RuntimeError("No negative LoG values found.")
 
-        max_samples = int(1e6)
-        if neg_vals.numel() > max_samples:
-            idx = torch.randperm(neg_vals.numel())[:max_samples]
+        if neg_vals.numel() > 1_000_000:
+            idx = torch.randperm(neg_vals.numel())[:1_000_000]
             neg_vals = neg_vals[idx]
 
         threshold = torch.quantile(neg_vals, 0.999).item()
@@ -237,39 +215,39 @@ def detect_spots_gpu(
     # -------------------------
     # Local minima detection
     # -------------------------
-    coords = local_minima_3d(log_t, min_distance).cpu().numpy()
+    coords_all = local_minima_3d(log_t, min_distance).cpu().numpy()
 
     # -------------------------
-    # Spot statistics (intensity & radii)
+    # Spot statistics (ALL spots)
     # -------------------------
-    intensities, radii = None, None
-    if spots_radius_detection and len(coords) > 0:
-        intensities, radii = spot_statistics(image_np, coords, gaussian_radius)
+    intensities_all, radii_all = None, None
+    if spots_radius_detection and len(coords_all) > 0:
+        intensities_all, radii_all = spot_statistics(
+            image_np, coords_all, gaussian_radius
+        )
 
     # -------------------------
-    # Gaussian fit on subset (optional)
+    # Gaussian fit on subset (OPTIONAL)
     # -------------------------
     good_c, bad_c = None, None
-    if gaussian_fit_fraction > 0 and len(coords) > 0:
+
+    if (
+            gaussian_fit_fraction > 0
+            and intensities_all is not None
+            and len(coords_all) > 0
+    ):
         good_I, good_c, bad_c = gaussian_fit_subset(
             image_np,
-            coords,
+            coords_all,
             gaussian_radius,
             sigma,
             r2_threshold,
             gaussian_fit_fraction,
             random_seed,
         )
-        # Keep spots above percentile of GOOD fits
+
+        # Intensity cutoff derived ONLY from good Gaussian fits
         I_cut = np.percentile(good_I, intensity_percentile_cutoff)
-        keep = good_I >= I_cut
-        coords = good_c[keep]
-        intensities = good_I[keep]
-        if radii is not None:
-            radii = radii[keep]
-
-    return coords, log_img, intensities, radii, good_c, bad_c
-
 
 
 # ============================================================
