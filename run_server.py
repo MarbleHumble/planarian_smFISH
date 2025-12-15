@@ -1,202 +1,93 @@
+#!/usr/bin/env python3
 """
-Server mode entry point for smFISH detection pipeline.
+run_server.py
+-------------
+Server mode entry point for smFISH spot detection pipeline.
+
+Supports:
+    - GPU (Raj-style 3D LoG + 2D Gaussian)
+    - CPU fallback using Big-FISH
+    - Optional control-image thresholding
+    - Optional radii / Gaussian validation
+    - Flexible config-driven settings
+
 Author: Elias Guan
 """
 
 import os
 import argparse
-import time
-import torch
+import yaml
+from tifffile import imread, imwrite
 import numpy as np
-from tifffile import imwrite
 
-from functions.io_utils import load_config, create_folder_in_same_directory
-from functions.spot_detection import detect_spots_from_config
-from functions.visualization import plot_spot_example
+from detect_spots_from_config import detect_spots_from_config
+from spot_detection import control_peak_intensities, compute_control_threshold_from_peaks
 
-
-# -------------------------------------------------
-# Argument parsing
-# -------------------------------------------------
-def parse_arguments():
-    parser = argparse.ArgumentParser(
-        description="Run smFISH spot detection pipeline (server mode)"
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=False,
-        default=None,
-        help="Path to the YAML configuration file"
-    )
-    return parser.parse_args()
-
-
-# -------------------------------------------------
-# Main pipeline
-# -------------------------------------------------
 def main():
-    t_start_total = time.perf_counter()
+    # ------------------------------
+    # Parse arguments
+    # ------------------------------
+    parser = argparse.ArgumentParser(description="smFISH spot detection server")
+    parser.add_argument("--config", type=str, required=True,
+                        help="Path to YAML configuration file")
+    args = parser.parse_args()
 
     # ------------------------------
-    # Step 0 — Parse arguments
+    # Load YAML config
     # ------------------------------
-    args = parse_arguments()
+    with open(args.config, "r") as f:
+        config = yaml.safe_load(f)
+
+    img_path = config.get("smFISHChannelPath")
+    results_folder = config.get("results_folder", os.path.join(os.path.dirname(img_path), "results"))
+    os.makedirs(results_folder, exist_ok=True)
 
     # ------------------------------
-    # Step 0.5 — GPU detection
+    # Optional control threshold
     # ------------------------------
-    if torch.cuda.is_available():
-        print(f"GPU detected: {torch.cuda.get_device_name(0)}")
-    else:
-        print("No GPU detected. Using CPU.")
+    control_threshold = None
+    if config.get("controlImage") and config.get("controlPath"):
+        print("Computing control-image threshold...")
+        _, peak_values, _ = control_peak_intensities(config["controlPath"], config, results_folder)
+        control_threshold = compute_control_threshold_from_peaks(peak_values, percentile=99)
+        print(f"Control-derived threshold: {control_threshold}")
+        config["experimentThreshold"] = control_threshold
 
     # ------------------------------
-    # Step 1 — Load config.yaml
+    # Detect experiment spots
     # ------------------------------
-    t0 = time.perf_counter()
-    config_path = args.config or os.path.join(
-        os.path.dirname(__file__), "config.yaml"
-    )
-    config = load_config(config_path)
-    t_config = time.perf_counter() - t0
+    spots_exp, exp_threshold_used, img_log_exp, sum_intensities, radii, good_coords, bad_coords = \
+        detect_spots_from_config(config, img_path=img_path, results_folder=results_folder)
 
-    print(f"Using config: {config_path}")
-    print("Loaded config parameters:")
-    for key, value in config.items():
-        print(f"  {key}: {value}")
+    # ------------------------------
+    # Reporting
+    # ------------------------------
+    print("--------------------------------------------------")
+    print(f"Detected {len(spots_exp)} experiment spots")
+    print(f"Threshold used: {exp_threshold_used}")
+    if good_coords is not None:
+        print(f"Gaussian-fit accepted: {len(good_coords)} spots")
+    if bad_coords is not None:
+        print(f"Gaussian-fit rejected: {len(bad_coords)} spots")
     print("--------------------------------------------------")
 
     # ------------------------------
-    # Step 2 — Results folders
+    # Save outputs
     # ------------------------------
-    exp_path = config["smFISHChannelPath"]
-    results_folder = create_folder_in_same_directory(exp_path, "results")
-
-    npy_folder = os.path.join(results_folder, "npy")
-    tiff_folder = os.path.join(results_folder, "tiff")
-    plots_folder = os.path.join(results_folder, "plots")
-
-    for folder in (npy_folder, tiff_folder, plots_folder):
-        os.makedirs(folder, exist_ok=True)
-
-    print(f"Results folder: {results_folder}")
-    print("--------------------------------------------------")
-
-    # ------------------------------
-    # Step 3 — Spot detection
-    # ------------------------------
-    t0 = time.perf_counter()
-    (
-        spots_exp,
-        threshold_used,
-        img_log_exp,
-        sum_intensities,
-        radii,
-        good_coords,
-        bad_coords,
-    ) = detect_spots_from_config(
-        config=config,
-        results_folder=results_folder,
-    )
-    t_detection = time.perf_counter() - t0
-
-    # ------------------------------
-    # Step 4 — Reporting
-    # ------------------------------
-    n_good = len(spots_exp)
-    n_bad = len(bad_coords) if bad_coords is not None else 0
-    n_total = n_good + n_bad
-
-    print(f"Detected {n_good} good spots")
-    print(f"Filtered out {n_bad} bad spots")
-    print(f"Total candidate spots: {n_total}")
-    print(f"Threshold used: {threshold_used}")
-
-    # ------------------------------
-    # Step 5 — Save outputs
-    # ------------------------------
-    t0 = time.perf_counter()
-
-    np.save(os.path.join(npy_folder, "spots_exp.npy"), spots_exp)
+    imwrite(os.path.join(results_folder, "experiment_LoG_filtered.tif"), img_log_exp, photometric="minisblack")
+    np.save(os.path.join(results_folder, "experiment_spots.npy"), spots_exp)
 
     if sum_intensities is not None:
-        np.save(
-            os.path.join(npy_folder, "spot_sum_intensity.npy"),
-            sum_intensities,
-        )
-
+        np.save(os.path.join(results_folder, "experiment_spot_intensity.npy"), sum_intensities)
     if radii is not None:
-        np.save(
-            os.path.join(npy_folder, "spot_radii_zyx.npy"),
-            radii,
-        )
+        np.save(os.path.join(results_folder, "experiment_spot_radii.npy"), radii)
+    if good_coords is not None:
+        np.save(os.path.join(results_folder, "experiment_spots_good.npy"), good_coords)
+    if bad_coords is not None:
+        np.save(os.path.join(results_folder, "experiment_spots_bad.npy"), bad_coords)
 
-    imwrite(
-        os.path.join(tiff_folder, "smFISH_LoG_filtered.tif"),
-        img_log_exp,
-        photometric="minisblack",
-    )
-
-    t_saving = time.perf_counter() - t0
-
-    # ------------------------------
-    # Step 6 — Plot example spots
-    # ------------------------------
-    t_plotting = 0.0
-    if config.get("spotsRadiusDetection", False) and n_good > 0:
-        t0 = time.perf_counter()
-
-        radius = int(config.get("plot_spot_size", 2))
-
-        # ---- Gaussian-like spot ----
-        coord_good = (
-            good_coords[0]
-            if good_coords is not None and len(good_coords) > 0
-            else spots_exp[0]
-        )
-
-        plot_spot_example(
-            img=img_log_exp,
-            coord=coord_good,
-            radius=radius,
-            save_path=os.path.join(
-                plots_folder, "spot_example_gaussian.png"
-            ),
-            title="Gaussian-like spot",
-        )
-
-        # ---- Non-Gaussian spot ----
-        if bad_coords is not None and len(bad_coords) > 0:
-            plot_spot_example(
-                img=img_log_exp,
-                coord=bad_coords[0],
-                radius=radius,
-                save_path=os.path.join(
-                    plots_folder, "spot_example_non_gaussian.png"
-                ),
-                title="Non-Gaussian spot",
-            )
-
-        t_plotting = time.perf_counter() - t0
-
-    # ------------------------------
-    # Step 7 — Timing summary
-    # ------------------------------
-    t_total = time.perf_counter() - t_start_total
-
-    print("\n================= TIMING SUMMARY =================")
-    print(f"Config loading     : {t_config:8.2f} s")
-    print(f"Spot detection     : {t_detection:8.2f} s")
-    print(f"Saving outputs     : {t_saving:8.2f} s")
-    print(f"Plotting           : {t_plotting:8.2f} s")
-    print("-------------------------------------------------")
-    print(f"TOTAL runtime      : {t_total:8.2f} s")
-    print("=================================================\n")
-
-    print("Pipeline completed successfully.")
     print(f"Results saved to: {results_folder}")
-
+    print("Pipeline completed successfully.")
 
 if __name__ == "__main__":
     main()

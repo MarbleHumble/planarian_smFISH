@@ -210,86 +210,32 @@ def compute_control_threshold_from_peaks(peak_values, percentile=99):
     thr = float(np.percentile(peak_values, percentile))
     return thr
 
+import os
+import numpy as np
+from tifffile import imread, imwrite
+
 def detect_spots_from_config(config, img_path=None, results_folder=None):
     """
-    smFISH spot detection with optional GPU acceleration using:
-        1) LoG minima
-        2) Raj lab-style plateau thresholding (3D sum)
-        3) Optional 2D Gaussian morphology validation and size filtering
+    smFISH spot detection wrapper supporting GPU (Raj-style 3D LoG + 2D Gaussian)
+    and CPU fallback using Big-FISH.
 
     Returns:
-        spots_exp (np.ndarray)
-        exp_threshold_used (float or None)
-        img_log_exp (np.ndarray)
-        sum_intensities (np.ndarray or None)
-        radii (np.ndarray or None)
-        good_coords (np.ndarray or None)
-        bad_coords (np.ndarray or None)
+        spots_exp (np.ndarray): detected spot coordinates
+        exp_threshold_used (float or None): intensity threshold applied
+        img_log_exp (np.ndarray): LoG-filtered image
+        sum_intensities (np.ndarray or None): 3D integrated intensities
+        radii (np.ndarray or None): spot radii (z,y,x)
+        good_coords (np.ndarray or None): spots passing Gaussian fit
+        bad_coords (np.ndarray or None): spots failing Gaussian fit
     """
-    import os
-    import numpy as np
-    from tifffile import imread, imwrite
-
-    # ------------------------------
-    # Defaults
-    # ------------------------------
-    exp_threshold_used = None
-    sum_intensities = None
-    radii = None
-    good_coords = None
-    bad_coords = None
-
-    # ------------------------------
-    # Backend selection
-    # ------------------------------
-    use_gpu = bool(config.get("use_gpu", False))
-    if use_gpu:
-        import torch
-        if not torch.cuda.is_available():
-            print("WARNING: CUDA unavailable, falling back to CPU.")
-            use_gpu = False
-
-    if use_gpu:
-        from functions.gpu_smfish import (
-            detect_spots_gpu_full,
-            set_max_performance,
-        )
-        set_max_performance()
-        print("smFISH backend: GPU (Raj + 2D Gaussian + Size Filter)")
-    else:
-        from bigfish.stack import log_filter
-        from bigfish.detection import detect_spots as bf_detect_spots
-        print("smFISH backend: Big-FISH CPU")
-
-    from .spot_detection import (
-        control_peak_intensities,
-        compute_control_threshold_from_peaks,
-        find_spots_around,
-    )
-
     # ------------------------------
     # Paths
     # ------------------------------
     if img_path is None:
         img_path = config["smFISHChannelPath"]
-
     if results_folder is None:
         results_folder = os.path.join(os.path.dirname(img_path), "results")
     os.makedirs(results_folder, exist_ok=True)
-
-    # ------------------------------
-    # Control threshold (optional)
-    # ------------------------------
-    control_threshold = None
-    if config.get("controlImage") and config.get("controlPath"):
-        print("Computing control-image threshold...")
-        _, peak_values, _ = control_peak_intensities(
-            config["controlPath"], config, results_folder
-        )
-        control_threshold = compute_control_threshold_from_peaks(
-            peak_values, percentile=99
-        )
-        print(f"Control-derived threshold: {control_threshold}")
 
     # ------------------------------
     # Load experiment image
@@ -300,38 +246,44 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
     compute_radii = bool(config.get("spotsRadiusDetection", False))
 
     # ------------------------------
-    # GPU DETECTION
+    # GPU backend
     # ------------------------------
+    use_gpu = bool(config.get("use_gpu", False))
     if use_gpu:
-        (
-            spots_exp,
-            exp_threshold_used,
-            img_log_exp,
-            sum_intensities,
-            radii,
-            good_coords,
-            bad_coords,
-        ) = detect_spots_gpu_full(
-            image_np=img_exp,
-            sigma=tuple(config["kernel_size"]),
-            min_distance=tuple(config["minimal_distance"]),
-            gaussian_radius=int(config.get("plot_spot_size", 2)),
-            gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 1.0)),
-            r2_threshold=float(config.get("r2_threshold", 0.4)),
-            random_seed=int(config.get("random_seed", 0)),
-            device=config.get("gpu_device", "cuda"),
-            voxel_size=tuple(config.get("voxel_size", (361, 75, 75))),
-            min_size_um=float(config.get("radius_for_spots", 200)),
-            diagnostic_folder=results_folder if config.get("save_diagnostics", True) else None,
-        )
+        import torch
+        if not torch.cuda.is_available():
+            print("WARNING: CUDA unavailable, falling back to CPU.")
+            use_gpu = False
+
+    if use_gpu:
+        from functions.gpu_smfish import detect_spots_gpu_full, set_max_performance
+        set_max_performance()
+        print("smFISH backend: GPU (Raj + 2D Gaussian + Size Filter)")
+
+        spots_exp, exp_threshold_used, img_log_exp, sum_intensities, radii, good_coords, bad_coords = \
+            detect_spots_gpu_full(
+                image_np=img_exp,
+                sigma=tuple(config["kernel_size"]),
+                min_distance=tuple(config["minimal_distance"]),
+                gaussian_radius=int(config.get("plot_spot_size", 2)),
+                gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 1.0)),
+                r2_threshold=float(config.get("r2_threshold", 0.4)),
+                random_seed=int(config.get("random_seed", 0)),
+                device=config.get("gpu_device", "cuda"),
+                voxel_size=tuple(config.get("voxel_size", (361, 75, 75))),
+                min_size_um=float(config.get("radius_for_spots", 200)),
+                diagnostic_folder=results_folder if config.get("save_diagnostics", True) else None
+            )
 
     # ------------------------------
-    # CPU (Big-FISH) DETECTION
+    # CPU fallback (Big-FISH)
     # ------------------------------
     else:
-        threshold_to_use = control_threshold if control_threshold is not None else config.get("experimentThreshold", None)
-        print(f"Using threshold for CPU detection: {threshold_to_use}")
+        from bigfish.stack import log_filter
+        from bigfish.detection import detect_spots as bf_detect_spots
+        print("smFISH backend: Big-FISH CPU")
 
+        threshold_to_use = config.get("experimentThreshold", None)
         spots_exp, exp_threshold_used = bf_detect_spots(
             images=img_exp,
             threshold=threshold_to_use,
@@ -341,24 +293,23 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
             log_kernel_size=config["kernel_size"],
             minimum_distance=config["minimal_distance"],
         )
-
         img_log_exp = log_filter(img_exp, config["kernel_size"])
 
+        # Optional radii computation
         if compute_radii and len(spots_exp) > 0:
-            sum_intensities = []
-            radii = []
-
+            from .spot_detection import find_spots_around
+            sum_intensities, radii = [], []
             for coord in spots_exp:
                 voxels = find_spots_around(coord, img_log_exp)
                 sum_intensities.append(np.sum(img_exp[tuple(voxels.T)]))
                 radii.append([
                     voxels[:, 0].ptp() + 1,
                     voxels[:, 1].ptp() + 1,
-                    voxels[:, 2].ptp() + 1,
+                    voxels[:, 2].ptp() + 1
                 ])
-
             sum_intensities = np.asarray(sum_intensities)
             radii = np.asarray(radii)
+        good_coords, bad_coords = None, None
 
     # ------------------------------
     # Reporting
