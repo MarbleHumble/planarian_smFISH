@@ -303,7 +303,7 @@ def detect_spots_gpu_full(
     r2_threshold=0.8,
     random_seed=0,
     device="cuda",
-    diagnostics_folder=None,
+    diagnostic_folder=None,
 ):
     """
     Full smFISH detection pipeline (Raj + Gaussian)
@@ -347,8 +347,8 @@ def detect_spots_gpu_full(
     depth_thresh, depth_elbow = elbow_threshold(
         depths,
         save_plot=None
-        if diagnostics_folder is None
-        else os.path.join(diagnostics_folder, "log_depth_elbow.png"),
+        if diagnostic_folder is None
+        else os.path.join(diagnostic_folder, "log_depth_elbow.png"),
         xlabel="Candidate index (sorted)",
         ylabel="LoG depth",
         title="LoG depth / prominence elbow",
@@ -370,8 +370,8 @@ def detect_spots_gpu_full(
     threshold, elbow_idx = raj_plateau_threshold(
         sum_intensities,
         save_plot=None
-        if diagnostics_folder is None
-        else os.path.join(diagnostics_folder, "raj_plateau.png"),
+        if diagnostic_folder is None
+        else os.path.join(diagnostic_folder, "raj_plateau.png"),
     )
 
     coords_int = coords[sum_intensities >= threshold]
@@ -409,10 +409,10 @@ def detect_spots_gpu_full(
     bad_coords = bad_fit
 
     # ------------------------------------------------
-    # Diagnostics
+    # diagnostic
     # ------------------------------------------------
-    if diagnostics_folder is not None:
-        os.makedirs(diagnostics_folder, exist_ok=True)
+    if diagnostic_folder is not None:
+        os.makedirs(diagnostic_folder, exist_ok=True)
 
         if len(r2_vals) > 0:
             plt.figure()
@@ -425,7 +425,7 @@ def detect_spots_gpu_full(
             )
             plt.tight_layout()
             plt.savefig(
-                os.path.join(diagnostics_folder, "gaussian_r2.png")
+                os.path.join(diagnostic_folder, "gaussian_r2.png")
             )
             plt.close()
 
