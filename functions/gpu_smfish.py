@@ -180,7 +180,7 @@ def gaussian_fit_subset(
     radius,
     expected_sigma,
     gaussian_fit_fraction=1.0,
-    r2_threshold=0.6,
+    r2_threshold=0.4,
     seed=0,
 ):
     """Validate spot morphology using 3D Gaussian R²."""
@@ -300,7 +300,7 @@ def detect_spots_gpu_full(
     min_distance,
     gaussian_radius=2,
     gaussian_fit_fraction=1.0,
-    r2_threshold=0.8,
+    r2_threshold=0.4,
     random_seed=0,
     device="cuda",
     diagnostic_folder=None,

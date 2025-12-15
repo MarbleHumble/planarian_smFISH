@@ -25,7 +25,7 @@ nvidia-smi
 echo "===== CUDA visible devices ====="
 $PYTHON - <<EOF
 import torch
-print("0.01 Local maxima filter, R2 = 0.6")
+print("0.01 Local maxima filter, R2 = 0.4")
 print("CUDA available:", torch.cuda.is_available())
 print("CUDA device count:", torch.cuda.device_count())
 if torch.cuda.is_available():
