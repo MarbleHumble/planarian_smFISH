@@ -63,7 +63,7 @@ def log_filter_gpu(image_np, sigma, device="cuda"):
 # Local minima detection (with strength filtering)
 # ============================================================
 
-def local_minima_3d_strict(log_img, min_distance, depth_percentile=99.9, device="cuda"):
+def local_minima_3d_strict(log_img, min_distance, depth_percentile=0.01, device="cuda"):
     """
     Detect local minima in LoG image and filter by response strength.
     This dramatically reduces background-induced minima.
@@ -180,7 +180,7 @@ def gaussian_fit_subset(
     radius,
     expected_sigma,
     gaussian_fit_fraction=1.0,
-    r2_threshold=0.8,
+    r2_threshold=0.6,
     seed=0,
 ):
     """Validate spot morphology using 3D Gaussian R²."""
