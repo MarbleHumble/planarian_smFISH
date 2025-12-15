@@ -25,12 +25,13 @@ nvidia-smi
 echo "===== CUDA visible devices ====="
 $PYTHON - <<EOF
 import torch
+print("0.01 Local maxima filter, R2 = 0.6")
 print("CUDA available:", torch.cuda.is_available())
 print("CUDA device count:", torch.cuda.device_count())
 if torch.cuda.is_available():
     print("GPU name:", torch.cuda.get_device_name(0))
 EOF
-print("0.01 Local maxima filter, R2 = 0.6")
+
 
 # Run smFISH pipeline
 $PYTHON /home/qgs8612/planarian_smFISH/run_server.py \
