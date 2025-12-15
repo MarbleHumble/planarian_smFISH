@@ -1,31 +1,66 @@
-# functions/visualization.py
 import numpy as np
 import matplotlib.pyplot as plt
 
 
-def plot_spot_example(img, coord, gaussian_fit=True, save_path="spot_example.png"):
+def plot_spot_example(
+    img,
+    coord,
+    radius=3,
+    gaussian_fit=True,
+    save_path="spot_example.png",
+    title=None,
+):
     """
-    Visualize a single 3D spot.
+    Visualize a single 3D smFISH spot.
+
     Args:
-        img (np.ndarray): 3D image (Z,Y,X)
-        coord (tuple/list/np.ndarray): (z, y, x) voxel coordinate
-        gaussian_fit (bool): True if the spot passed Gaussian fitting
-        save_path (str): Where to save the figure
+        img (np.ndarray): 3D image (Z, Y, X)
+        coord (array-like): (z, y, x) voxel coordinate
+        radius (int): Half-size of crop in Y/X (Z uses radius//2)
+        gaussian_fit (bool): Whether this spot passed Gaussian fitting
+        save_path (str): Output image path
+        title (str or None): Optional custom title
     """
-    z, y, x = coord
-    z1, z2 = max(0, z - 2), min(img.shape[0], z + 3)
-    y1, y2 = max(0, y - 5), min(img.shape[1], y + 6)
-    x1, x2 = max(0, x - 5), min(img.shape[2], x + 6)
+    z, y, x = map(int, coord)
+    Z, Y, X = img.shape
+
+    rz = max(1, radius // 2)
+
+    z1, z2 = max(0, z - rz), min(Z, z + rz + 1)
+    y1, y2 = max(0, y - radius), min(Y, y + radius + 1)
+    x1, x2 = max(0, x - radius), min(X, x + radius + 1)
 
     sub = img[z1:z2, y1:y2, x1:x2]
 
-    # Show maximum intensity projection in Z
-    mip = sub.max(axis=0)
+    if sub.size == 0:
+        print(f"WARNING: Empty crop for spot {coord}")
+        return
 
-    plt.figure(figsize=(5, 5))
-    plt.imshow(mip, cmap='hot')
-    title = f"{'Gaussian' if gaussian_fit else 'Non-Gaussian'} spot at {coord}"
-    plt.title(title)
-    plt.axis('off')
+    # Projections
+    mip_xy = sub.max(axis=0)
+    mid_z = sub.shape[0] // 2
+    mid_y = sub.shape[1] // 2
+    mid_x = sub.shape[2] // 2
+
+    fig, axes = plt.subplots(1, 3, figsize=(9, 3))
+
+    axes[0].imshow(mip_xy, cmap="hot")
+    axes[0].set_title("XY (Z MIP)")
+
+    axes[1].imshow(sub[mid_z, :, :], cmap="hot")
+    axes[1].set_title("XY (center Z)")
+
+    axes[2].imshow(sub[:, mid_y, :], cmap="hot")
+    axes[2].set_title("XZ")
+
+    for ax in axes:
+        ax.axis("off")
+
+    if title is None:
+        fit_label = "Gaussian" if gaussian_fit else "Non-Gaussian"
+        title = f"{fit_label} spot @ {tuple(coord)}"
+
+    plt.suptitle(title, fontsize=10)
+    plt.tight_layout()
     plt.savefig(save_path, dpi=150)
     plt.close()

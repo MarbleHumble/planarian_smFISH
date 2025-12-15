@@ -213,12 +213,12 @@ def compute_control_threshold_from_peaks(peak_values, percentile=99):
 def detect_spots_from_config(config, img_path=None, results_folder=None):
     """
     smFISH spot detection with optional GPU acceleration using:
-        1) LoG minima on GPU
-        2) Raj lab-style plateau thresholding based on 3D sum intensity
-        3) Optional Gaussian fitting filter
+        1) LoG minima
+        2) Raj lab-style plateau thresholding (3D sum)
+        3) Optional Gaussian morphology validation
 
     Returns:
-        spots_exp (np.ndarray): spot coordinates (N,3)
+        spots_exp (np.ndarray)
         exp_threshold_used (float or None)
         img_log_exp (np.ndarray)
         sum_intensities (np.ndarray or None)
@@ -251,7 +251,10 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
             use_gpu = False
 
     if use_gpu:
-        from functions.gpu_smfish import detect_spots_gpu_full, set_max_performance
+        from functions.gpu_smfish import (
+            detect_spots_gpu_full,
+            set_max_performance,
+        )
         set_max_performance()
         print("smFISH backend: GPU (Raj + Gaussian)")
     else:
@@ -281,8 +284,12 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
     control_threshold = None
     if config.get("controlImage") and config.get("controlPath"):
         print("Computing control-image threshold...")
-        _, peak_values, _ = control_peak_intensities(config["controlPath"], config, results_folder)
-        control_threshold = compute_control_threshold_from_peaks(peak_values, percentile=99)
+        _, peak_values, _ = control_peak_intensities(
+            config["controlPath"], config, results_folder
+        )
+        control_threshold = compute_control_threshold_from_peaks(
+            peak_values, percentile=99
+        )
         print(f"Control-derived threshold: {control_threshold}")
 
     # ------------------------------
@@ -290,6 +297,7 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
     # ------------------------------
     img_exp = imread(img_path)
     print(f"Loaded experiment image: {img_exp.shape}")
+
     compute_radii = bool(config.get("spotsRadiusDetection", False))
 
     # ------------------------------
@@ -309,17 +317,27 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
             sigma=tuple(config["kernel_size"]),
             min_distance=tuple(config["minimal_distance"]),
             gaussian_radius=int(config.get("plot_spot_size", 2)),
-            gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 1.0)),
+            gaussian_fit_fraction=float(
+                config.get("gaussian_fit_fraction", 1.0)
+            ),
             r2_threshold=float(config.get("r2_threshold", 0.8)),
             random_seed=int(config.get("random_seed", 0)),
             device=config.get("gpu_device", "cuda"),
+            diagnostic_folder=results_folder
+            if config.get("save_diagnostics", True)
+            else None,
         )
 
     # ------------------------------
     # CPU (Big-FISH) DETECTION
     # ------------------------------
     else:
-        threshold_to_use = control_threshold if control_threshold is not None else config.get("experimentThreshold", None)
+        threshold_to_use = (
+            control_threshold
+            if control_threshold is not None
+            else config.get("experimentThreshold", None)
+        )
+
         print(f"Using threshold for CPU detection: {threshold_to_use}")
 
         spots_exp, exp_threshold_used = bf_detect_spots(
@@ -337,31 +355,63 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
         if compute_radii and len(spots_exp) > 0:
             sum_intensities = []
             radii = []
+
             for coord in spots_exp:
                 voxels = find_spots_around(coord, img_log_exp)
-                sum_intensities.append(np.sum(img_exp[tuple(voxels.T)]))
-                z_span = voxels[:, 0].ptp() + 1
-                y_span = voxels[:, 1].ptp() + 1
-                x_span = voxels[:, 2].ptp() + 1
-                radii.append([z_span, y_span, x_span])
+                sum_intensities.append(
+                    np.sum(img_exp[tuple(voxels.T)])
+                )
+                radii.append(
+                    [
+                        voxels[:, 0].ptp() + 1,
+                        voxels[:, 1].ptp() + 1,
+                        voxels[:, 2].ptp() + 1,
+                    ]
+                )
+
             sum_intensities = np.asarray(sum_intensities)
             radii = np.asarray(radii)
 
+    # ------------------------------
+    # Reporting
+    # ------------------------------
     print(f"Detected {len(spots_exp)} experiment spots")
 
     # ------------------------------
     # Save outputs
     # ------------------------------
-    imwrite(os.path.join(results_folder, "experiment_LoG_filtered.tif"), img_log_exp, photometric="minisblack")
-    np.save(os.path.join(results_folder, "experiment_spots.npy"), spots_exp)
+    imwrite(
+        os.path.join(results_folder, "experiment_LoG_filtered.tif"),
+        img_log_exp,
+        photometric="minisblack",
+    )
+
+    np.save(
+        os.path.join(results_folder, "experiment_spots.npy"),
+        spots_exp,
+    )
 
     if compute_radii and sum_intensities is not None:
-        np.save(os.path.join(results_folder, "experiment_spot_intensity.npy"), sum_intensities)
-        np.save(os.path.join(results_folder, "experiment_spot_radii.npy"), radii)
+        np.save(
+            os.path.join(results_folder, "experiment_spot_intensity.npy"),
+            sum_intensities,
+        )
+        np.save(
+            os.path.join(results_folder, "experiment_spot_radii.npy"),
+            radii,
+        )
 
     print("Saved experiment results.")
 
-    return spots_exp, exp_threshold_used, img_log_exp, sum_intensities, radii, good_coords, bad_coords
+    return (
+        spots_exp,
+        exp_threshold_used,
+        img_log_exp,
+        sum_intensities,
+        radii,
+        good_coords,
+        bad_coords,
+    )
 
 
 
