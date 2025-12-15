@@ -235,67 +235,199 @@ def gaussian_fit_subset(
         np.asarray(r2_vals),
     )
 
+import os
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
 
-# ============================================================
-# Full GPU detection pipeline
-# ============================================================
+def compute_log_depths(
+    log_img,
+    coords,
+    radius=2,
+    background_percentile=90,
+):
+    Z, Y, X = log_img.shape
+    depths = np.zeros(len(coords), dtype=np.float32)
+
+    for i, (z, y, x) in enumerate(coords):
+        z1, z2 = max(0, z - radius), min(Z, z + radius + 1)
+        y1, y2 = max(0, y - radius), min(Y, y + radius + 1)
+        x1, x2 = max(0, x - radius), min(X, x + radius + 1)
+
+        patch = log_img[z1:z2, y1:y2, x1:x2]
+        bg = np.percentile(patch, background_percentile)
+        depths[i] = bg - log_img[z, y, x]
+
+    return depths
+def elbow_threshold(
+    values,
+    save_plot=None,
+    xlabel="Index",
+    ylabel="Value",
+    title="Elbow plot",
+):
+    sorted_vals = np.sort(values)[::-1]
+    n = len(sorted_vals)
+
+    x = np.arange(n)
+    y = sorted_vals
+
+    # line between endpoints
+    line = y[0] + (y[-1] - y[0]) * x / (n - 1)
+    dist = y - line
+
+    elbow_idx = np.argmax(dist)
+    threshold = sorted_vals[elbow_idx]
+
+    if save_plot is not None:
+        plt.figure()
+        plt.plot(sorted_vals, "-k", linewidth=1)
+        plt.axvline(elbow_idx, color="r", linestyle="--")
+        plt.axhline(threshold, color="r", linestyle="--")
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.title(title)
+        plt.tight_layout()
+        plt.savefig(save_plot)
+        plt.close()
+
+    return threshold, elbow_idx
+
 
 def detect_spots_gpu_full(
     image_np,
     sigma,
     min_distance,
     gaussian_radius=2,
+    gaussian_fit_fraction=1.0,
     r2_threshold=0.8,
     random_seed=0,
     device="cuda",
     diagnostics_folder=None,
 ):
     """
-    Full smFISH detection pipeline:
-      1) LoG proposal generation
-      2) Strict local minima + depth filtering
-      3) Raj plateau intensity thresholding
-      4) Gaussian shape validation
+    Full smFISH detection pipeline (Raj + Gaussian)
+
+    Steps:
+      1) LoG filtering
+      2) Strict local minima detection
+      3) LoG depth (prominence) filtering
+      4) Raj plateau intensity threshold
+      5) Gaussian shape validation (subset)
     """
+
+    rng = np.random.default_rng(random_seed)
     torch.manual_seed(random_seed)
 
-    # --- LoG filtering ---
+    # ------------------------------------------------
+    # 1. LoG filtering
+    # ------------------------------------------------
     log_img = -log_filter_gpu(image_np, sigma, device)
 
-    # --- Local minima proposals ---
-    coords = local_minima_3d_strict(log_img, min_distance, device=device)
+    # ------------------------------------------------
+    # 2. Local minima proposals
+    # ------------------------------------------------
+    coords = local_minima_3d_strict(
+        log_img, min_distance, device=device
+    )
+
     if len(coords) == 0:
         return np.empty((0, 3)), None, log_img, None, None, None, None
 
-    # --- Spot statistics (RAW image) ---
-    sum_intensities, radii = spot_statistics(image_np, coords, gaussian_radius)
+    # ------------------------------------------------
+    # 3. LoG depth / prominence filtering
+    # ------------------------------------------------
+    depths = compute_log_depths(
+        log_img,
+        coords,
+        radius=gaussian_radius,
+        background_percentile=90,
+    )
 
-    # --- Raj plateau threshold ---
+    depth_thresh, depth_elbow = elbow_threshold(
+        depths,
+        save_plot=None
+        if diagnostics_folder is None
+        else os.path.join(diagnostics_folder, "log_depth_elbow.png"),
+        xlabel="Candidate index (sorted)",
+        ylabel="LoG depth",
+        title="LoG depth / prominence elbow",
+    )
+
+    keep_mask = depths >= depth_thresh
+    coords = coords[keep_mask]
+
+    if len(coords) == 0:
+        return np.empty((0, 3)), depth_thresh, log_img, None, None, None, None
+
+    # ------------------------------------------------
+    # 4. Raj plateau threshold (RAW image)
+    # ------------------------------------------------
+    sum_intensities, radii = spot_statistics(
+        image_np, coords, gaussian_radius
+    )
+
     threshold, elbow_idx = raj_plateau_threshold(
         sum_intensities,
-        save_plot=None if diagnostics_folder is None else f"{diagnostics_folder}/raj_plateau.png",
+        save_plot=None
+        if diagnostics_folder is None
+        else os.path.join(diagnostics_folder, "raj_plateau.png"),
     )
 
     coords_int = coords[sum_intensities >= threshold]
 
-    # --- Gaussian fitting ---
-    good_coords, bad_coords, r2_vals = gaussian_fit_subset(
+    if len(coords_int) == 0:
+        return np.empty((0, 3)), threshold, log_img, sum_intensities, radii, None, None
+
+    # ------------------------------------------------
+    # 5. Gaussian fitting (subset)
+    # ------------------------------------------------
+    n_candidates = len(coords_int)
+
+    if gaussian_fit_fraction < 1.0:
+        n_fit = max(1, int(n_candidates * gaussian_fit_fraction))
+        fit_idx = rng.choice(n_candidates, n_fit, replace=False)
+    else:
+        fit_idx = np.arange(n_candidates)
+
+    coords_fit = coords_int[fit_idx]
+
+    good_fit, bad_fit, r2_vals = gaussian_fit_subset(
         image_np,
-        coords_int,
+        coords_fit,
         gaussian_radius,
         sigma,
         r2_threshold=r2_threshold,
         seed=random_seed,
     )
 
-    # --- Diagnostics ---
-    if diagnostics_folder is not None and len(r2_vals) > 0:
-        plt.figure()
-        plt.hist(r2_vals, bins=50)
-        plt.axvline(r2_threshold, color="r")
-        plt.title("Gaussian fit R² distribution")
-        plt.savefig(f"{diagnostics_folder}/gaussian_r2.png")
-        plt.close()
+    fitted_mask = np.zeros(n_candidates, dtype=bool)
+    fitted_mask[fit_idx] = True
+
+    accepted_unfitted = coords_int[~fitted_mask]
+    good_coords = np.vstack([good_fit, accepted_unfitted])
+    bad_coords = bad_fit
+
+    # ------------------------------------------------
+    # Diagnostics
+    # ------------------------------------------------
+    if diagnostics_folder is not None:
+        os.makedirs(diagnostics_folder, exist_ok=True)
+
+        if len(r2_vals) > 0:
+            plt.figure()
+            plt.hist(r2_vals, bins=50)
+            plt.axvline(r2_threshold, color="r", linestyle="--")
+            plt.xlabel("Gaussian fit R²")
+            plt.ylabel("Count")
+            plt.title(
+                f"Gaussian R² (fraction={gaussian_fit_fraction:.2f})"
+            )
+            plt.tight_layout()
+            plt.savefig(
+                os.path.join(diagnostics_folder, "gaussian_r2.png")
+            )
+            plt.close()
 
     return (
         good_coords,
@@ -306,6 +438,7 @@ def detect_spots_gpu_full(
         good_coords,
         bad_coords,
     )
+
 
 
 # ============================================================
