@@ -29,7 +29,6 @@ def gaussian_kernel_1d(sigma, device):
     k = torch.exp(-(x**2) / (2 * sigma**2))
     return k / k.sum()
 
-
 def log_filter_gpu(image_np, sigma, device="cuda"):
     """
     3D LoG filtering using separable Gaussian + discrete Laplacian
@@ -57,25 +56,27 @@ def log_filter_gpu(image_np, sigma, device="cuda"):
     lap *= (sz**2 + sy**2 + sx**2)
     return (-lap).squeeze().cpu().numpy()
 
-
-def local_minima_3d(log_img, min_distance, device="cuda"):
+def local_minima_3d_strict(log_img, min_distance, depth_percentile=0.01, device="cuda"):
+    """
+    Strict 3D local minima detection (GPU)
+    Only keep minima that exceed depth percentile.
+    """
     dz, dy, dx = min_distance
     x = torch.from_numpy(log_img).to(device)[None, None]
     min_filt = -F.max_pool3d(
-        -x,
-        kernel_size=(2*dz+1, 2*dy+1, 2*dx+1),
-        stride=1,
-        padding=(dz, dy, dx)
+        -x, kernel_size=(2*dz+1, 2*dy+1, 2*dx+1),
+        stride=1, padding=(dz, dy, dx)
     )
-    mask = x == min_filt
-    return mask.squeeze().nonzero(as_tuple=False).cpu().numpy()
-
+    depth_thresh = np.percentile(log_img, depth_percentile)
+    mask = (x == min_filt) & (x < -depth_thresh)
+    coords = mask.squeeze().nonzero(as_tuple=False).cpu().numpy().astype(np.int16)
+    return coords
 
 # ============================================================
 # ---------------- Spot metrics ------------------------------
 # ============================================================
 
-def compute_log_depths(log_img, coords, radius=2, bg_percentile=90):
+def compute_log_depths(log_img, coords, radius=2):
     depths = np.zeros(len(coords), np.float32)
     Z, Y, X = log_img.shape
     for i, (z, y, x) in enumerate(coords):
@@ -83,62 +84,39 @@ def compute_log_depths(log_img, coords, radius=2, bg_percentile=90):
         y1, y2 = max(0, y-radius), min(Y, y+radius+1)
         x1, x2 = max(0, x-radius), min(X, x+radius+1)
         patch = log_img[z1:z2, y1:y2, x1:x2]
-        bg = np.percentile(patch, bg_percentile)
+        bg = np.percentile(patch, 90)
         depths[i] = bg - log_img[z, y, x]
     return depths
 
-
-def local_contrast(img, coords, radius=2, bg_radius=6, bg_percentile=50):
-    contrast = np.zeros(len(coords), np.float32)
+def compute_local_contrast(img, coords, radius):
     Z, Y, X = img.shape
+    out = np.zeros(len(coords), dtype=np.float32)
     for i, (z, y, x) in enumerate(coords):
         z1, z2 = max(0, z-radius), min(Z, z+radius+1)
         y1, y2 = max(0, y-radius), min(Y, y+radius+1)
         x1, x2 = max(0, x-radius), min(X, x+radius+1)
+        patch = img[z1:z2, y1:y2, x1:x2]
+        center = img[z, y, x]
+        bg = np.percentile(patch, 75)
+        out[i] = (center + 1e-6) / (bg + 1e-6)
+    return out
 
-        bz1, bz2 = max(0, z-bg_radius), min(Z, z+bg_radius+1)
-        by1, by2 = max(0, y-bg_radius), min(Y, y+bg_radius+1)
-        bx1, bx2 = max(0, x-bg_radius), min(X, x+bg_radius+1)
-
-        spot = img[z1:z2, y1:y2, x1:x2].max()
-        bg = np.percentile(img[bz1:bz2, by1:by2, bx1:bx2], bg_percentile)
-
-        contrast[i] = (spot + 1e-6) / (bg + 1e-6)
-    return contrast
-
-
-def moment_sizes(img, coords, radius):
-    sizes = np.zeros((len(coords), 3), np.float32)
+def spot_statistics(img, coords, radius=2):
     Z, Y, X = img.shape
+    intensities = np.zeros(len(coords), np.float32)
+    moments = np.zeros((len(coords), 3), np.float32)
     for i, (z, y, x) in enumerate(coords):
         z1, z2 = max(0, z-radius), min(Z, z+radius+1)
         y1, y2 = max(0, y-radius), min(Y, y+radius+1)
         x1, x2 = max(0, x-radius), min(X, x+radius+1)
-
         sub = img[z1:z2, y1:y2, x1:x2]
+        intensities[i] = sub.sum()
         zz, yy, xx = np.indices(sub.shape)
         w = sub + 1e-6
-
-        sizes[i, 0] = np.sqrt(np.average((zz-zz.mean())**2, weights=w))
-        sizes[i, 1] = np.sqrt(np.average((yy-yy.mean())**2, weights=w))
-        sizes[i, 2] = np.sqrt(np.average((xx-xx.mean())**2, weights=w))
-    return sizes
-
-
-def integrated_intensity(img, coords, radius):
-    vals = np.zeros(len(coords), np.float32)
-    Z, Y, X = img.shape
-    for i, (z, y, x) in enumerate(coords):
-        z1, z2 = max(0, z-radius), min(Z, z+radius+1)
-        y1, y2 = max(0, y-radius), min(Y, y+radius+1)
-        x1, x2 = max(0, x-radius), min(X, x+radius+1)
-        vals[i] = img[z1:z2, y1:y2, x1:x2].sum()
-    return vals
-
-
-# ============================================================
-# ---------------- Raj plateau -------------------------------
-# ============================================================
+        moments[i, 0] = np.sqrt(np.average((zz-zz.mean())**2, weights=w))
+        moments[i, 1] = np.sqrt(np.average((yy-yy.mean())**2, weights=w))
+        moments[i, 2] = np.sqrt(np.average((xx-xx.mean())**2, weights=w))
+    return intensities, moments
 
 def raj_plateau_threshold(intensities, smooth_window=11, slope_thresh=0.02):
     I = np.sort(intensities)[::-1]
@@ -147,25 +125,7 @@ def raj_plateau_threshold(intensities, smooth_window=11, slope_thresh=0.02):
     dI /= dI.max()
     idx = np.where(dI < slope_thresh)[0]
     cut = idx[0] if len(idx) else int(0.2 * len(I))
-    return I[cut]
-
-
-def compute_local_contrast(img, coords, radius):
-    Z, Y, X = img.shape
-    out = np.zeros(len(coords), dtype=np.float32)
-
-    for i, (z, y, x) in enumerate(coords):
-        z1, z2 = max(0, z-radius), min(Z, z+radius+1)
-        y1, y2 = max(0, y-radius), min(Y, y+radius+1)
-        x1, x2 = max(0, x-radius), min(X, x+radius+1)
-
-        patch = img[z1:z2, y1:y2, x1:x2]
-        center = img[z, y, x]
-        bg = np.percentile(patch, 75)
-        out[i] = (center + 1e-6) / (bg + 1e-6)
-
-    return out
-
+    return I[cut], cut
 
 def _save_hist(values, xlabel, folder, fname):
     plt.figure(figsize=(4,3))
@@ -175,7 +135,6 @@ def _save_hist(values, xlabel, folder, fname):
     plt.tight_layout()
     plt.savefig(os.path.join(folder, fname))
     plt.close()
-
 
 # ============================================================
 # ---------------- Main pipeline -----------------------------
@@ -195,7 +154,6 @@ def detect_spots_gpu(
 ):
     """
     GPU smFISH detection with diagnostics.
-
     Returns:
         coords_final (N,3)
         stats (dict)
@@ -203,14 +161,10 @@ def detect_spots_gpu(
 
     stats = {}
 
-    # -------------------------------------------------
     # 1. LoG
-    # -------------------------------------------------
     log_img = -log_filter_gpu(image_np, sigma, device=device)
 
-    # -------------------------------------------------
     # 2. Local minima
-    # -------------------------------------------------
     coords = local_minima_3d_strict(
         log_img,
         min_distance=min_distance,
@@ -218,72 +172,50 @@ def detect_spots_gpu(
         device=device
     )
     stats["n_minima"] = len(coords)
-
     if len(coords) == 0:
         return np.empty((0, 3)), stats
 
-    # -------------------------------------------------
     # 3. Depth filter
-    # -------------------------------------------------
     depths = compute_log_depths(log_img, coords, radius=radius)
     depth_thresh = np.percentile(depths, 50)
     keep = depths >= depth_thresh
-
     coords = coords[keep]
     depths = depths[keep]
     stats["n_after_depth"] = len(coords)
 
-    # -------------------------------------------------
     # 4. Local contrast filter
-    # -------------------------------------------------
     contrasts = compute_local_contrast(image_np, coords, radius)
     keep = contrasts >= min_contrast
-
     coords = coords[keep]
     contrasts = contrasts[keep]
     stats["n_after_contrast"] = len(coords)
 
-    # -------------------------------------------------
     # 5. Raj plateau (intensity)
-    # -------------------------------------------------
     intensities, moments = spot_statistics(image_np, coords, radius)
     I_thresh, _ = raj_plateau_threshold(intensities)
-
     keep = intensities >= I_thresh
     coords = coords[keep]
     moments = moments[keep]
     stats["n_after_raj"] = len(coords)
 
-    # -------------------------------------------------
-    # 6. Moment-based size + anisotropy filter
-    # -------------------------------------------------
+    # 6. Moment-based size & anisotropy filter
     sz, sy, sx = moments.T
     size_um = np.cbrt(sz * sy * sx)
-
-    aspect_ratio = np.maximum.reduce([
-        sy / (sx + 1e-6),
-        sx / (sy + 1e-6)
-    ])
-
+    aspect_ratio = np.maximum.reduce([sy / (sx + 1e-6), sx / (sy + 1e-6)])
     keep = (
         (size_um >= size_bounds[0]) &
         (size_um <= size_bounds[1]) &
         (aspect_ratio <= aspect_ratio_max)
     )
-
     coords_final = coords[keep]
     stats["n_after_size"] = len(coords_final)
 
-    # -------------------------------------------------
     # Diagnostics
-    # -------------------------------------------------
     if diagnostics is not None:
         os.makedirs(diagnostics, exist_ok=True)
-
         _save_hist(depths, "LoG depth", diagnostics, "depth.png")
         _save_hist(contrasts, "Local contrast", diagnostics, "contrast.png")
         _save_hist(intensities, "Integrated intensity", diagnostics, "intensity.png")
         _save_hist(size_um, "Moment-derived size (µm)", diagnostics, "size.png")
 
     return coords_final, stats
-
