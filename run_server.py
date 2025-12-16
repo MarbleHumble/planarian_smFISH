@@ -81,7 +81,7 @@ def main():
                 gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 1.0)),
                 r2_threshold=float(config.get("r2_threshold", 0.4)),
                 random_seed=int(config.get("random_seed", 0)),
-                device=config.get("gpu_device", "cuda"),
+                device=config.get("gpu_device", "cuda"),:Wq
                 voxel_size=tuple(config.get("voxel_size", (361, 75, 75))),
                 min_size_um=float(config.get("radius_for_spots", 200)),
                 diagnostic_folder=results_folder if config.get("save_diagnostics", True) else None

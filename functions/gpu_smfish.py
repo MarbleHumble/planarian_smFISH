@@ -265,7 +265,11 @@ def detect_spots_gpu_full(image_np, sigma, min_distance,
             plt.tight_layout()
             plt.savefig(os.path.join(diagnostic_folder,"gaussian_r2.png"))
             plt.close()
-
+    print("DEBUG:")
+    print("coords_int:", len(coords_int))
+    print("good_fit:", len(good_fit))
+    print("bad_fit:", len(bad_fit))
+    print("good_coords (final):", len(good_coords))
     return good_coords, threshold, log_img, sum_intensities, radii, good_coords, bad_coords
 
 # ============================================================
