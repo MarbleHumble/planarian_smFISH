@@ -24,7 +24,7 @@ plot_spot_size: 4
 gaussian_fit_fraction: 1.0        # fraction of spots to Gaussian-fit
 intensity_percentile_cutoff: 99.9 # percentile of GOOD spots (lower bound)
 random_seed: 0                    # reproducibility
-r2_threshold : 0.8
+r2_threshold : 0.3
 
 # --- Decomposition / Clustering ---
 decomposition_thresh: [0.7, 1, 5]
