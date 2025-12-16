@@ -29,34 +29,36 @@ def gaussian_kernel_1d(sigma, device):
 
 def log_filter_gpu(image_np, sigma, device="cuda"):
     """
-    3D LoG filtering using separable convolutions on GPU
+    3D LoG filtering using separable Gaussian + discrete Laplacian (GPU-safe)
     """
     device = torch.device(device)
-    x = torch.from_numpy(image_np).float().to(device)[None, None]
+    x = torch.from_numpy(image_np).float().to(device)[None, None]  # (1,1,Z,Y,X)
 
     sz, sy, sx = sigma
+
+    # --- Gaussian smoothing (separable) ---
     kz = gaussian_kernel_1d(sz, device)[None, None, :, None, None]
     ky = gaussian_kernel_1d(sy, device)[None, None, None, :, None]
     kx = gaussian_kernel_1d(sx, device)[None, None, None, None, :]
 
-    x = F.conv3d(x, kz, padding=(kz.shape[2]//2, 0, 0))
-    x = F.conv3d(x, ky, padding=(0, ky.shape[3]//2, 0))
-    x = F.conv3d(x, kx, padding=(0, 0, kx.shape[4]//2))
+    x = F.conv3d(x, kz, padding=(kz.shape[2] // 2, 0, 0))
+    x = F.conv3d(x, ky, padding=(0, ky.shape[3] // 2, 0))
+    x = F.conv3d(x, kx, padding=(0, 0, kx.shape[4] // 2))
 
-    lap = (-6*x
-           + F.pad(x[:, :, 1:], (0, 0, 0, 0, 0, 1))
-           + F.pad(x[:, :, :-1], (0, 0, 0, 0, 1, 0))
-           + F.pad(x[:, :, :, 1:], (0, 0, 0, 1, 0, 0))
-           + F.pad(x[:, :, :, :-1], (0, 0, 1, 0, 0, 0))
-           + F.pad(x[:, :, :, :, 1:], (0, 1, 0, 0, 0, 0))
-           + F.pad(x[:, :, :, :, -1:], (1, 0, 0, 0, 0, 0))
-           )
+    # --- Discrete Laplacian (6-neighbor) ---
+    lap = (
+        -6 * x
+        + torch.roll(x, shifts=+1, dims=2)
+        + torch.roll(x, shifts=-1, dims=2)
+        + torch.roll(x, shifts=+1, dims=3)
+        + torch.roll(x, shifts=-1, dims=3)
+        + torch.roll(x, shifts=+1, dims=4)
+        + torch.roll(x, shifts=-1, dims=4)
+    )
+
     lap *= (sz**2 + sy**2 + sx**2)
     return lap.squeeze().cpu().numpy()
 
-# ============================================================
-# ---------------- Local Minima Detection --------------------
-# ============================================================
 
 def local_minima_3d_strict(log_img, min_distance, depth_percentile=0.01, device="cuda"):
     dz, dy, dx = min_distance
