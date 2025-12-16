@@ -11,6 +11,7 @@ planarian_smFISH/
 │   ├── io_utils.py
 │   ├── preprocessing.py
 │   ├── gpu_smfish.py
+│   ├── gpu_smfish_v2.py
 │   ├── spot_detection.py
 │   ├── visualization.py
 │   └── utils.py           # Helper functions, logging, etc.

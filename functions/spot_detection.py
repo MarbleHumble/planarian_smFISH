@@ -216,74 +216,113 @@ from tifffile import imread, imwrite
 
 def detect_spots_from_config(config, img_path=None, results_folder=None):
     """
-    smFISH spot detection wrapper supporting GPU (Raj-style 3D LoG + 2D Gaussian)
-    and CPU fallback using Big-FISH.
+    smFISH spot detection wrapper.
 
-    Returns:
-        spots_exp (np.ndarray): detected spot coordinates
-        exp_threshold_used (float or None): intensity threshold applied
-        img_log_exp (np.ndarray): LoG-filtered image
-        sum_intensities (np.ndarray or None): 3D integrated intensities
-        radii (np.ndarray or None): spot radii (z,y,x)
-        good_coords (np.ndarray or None): spots passing Gaussian fit
-        bad_coords (np.ndarray or None): spots failing Gaussian fit
+    GPU backend (v2):
+        LoG → depth percentile → local contrast → Raj plateau → moment size filter
+        + per-step counts + QC plots
+
+    CPU fallback:
+        Big-FISH
+
+    Returns (API compatible):
+        spots_exp (np.ndarray): detected spot coordinates (N,3)
+        exp_threshold_used (None): kept for compatibility
+        img_log_exp (np.ndarray or None)
+        sum_intensities (None)
+        radii (None)
+        good_coords (np.ndarray)
+        bad_coords (None)
     """
+
+    import os
+    import numpy as np
+    from tifffile import imread, imwrite
+
     # ------------------------------
     # Paths
     # ------------------------------
     if img_path is None:
         img_path = config["smFISHChannelPath"]
+
     if results_folder is None:
         results_folder = os.path.join(os.path.dirname(img_path), "results")
+
     os.makedirs(results_folder, exist_ok=True)
 
     # ------------------------------
-    # Load experiment image
+    # Load image
     # ------------------------------
     img_exp = imread(img_path)
     print(f"Loaded experiment image: {img_exp.shape}")
 
-    compute_radii = bool(config.get("spotsRadiusDetection", False))
-
     # ------------------------------
-    # GPU backend
+    # Decide backend
     # ------------------------------
     use_gpu = bool(config.get("use_gpu", False))
     if use_gpu:
-        import torch
-        if not torch.cuda.is_available():
-            print("WARNING: CUDA unavailable, falling back to CPU.")
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                print("WARNING: CUDA unavailable, falling back to CPU.")
+                use_gpu = False
+        except ImportError:
             use_gpu = False
 
+    # ==========================================================
+    # GPU BACKEND (v2)
+    # ==========================================================
     if use_gpu:
-        from functions.gpu_smfish import detect_spots_gpu_full, set_max_performance
-        set_max_performance()
-        print("smFISH backend: GPU (Raj + 2D Gaussian + Size Filter)")
+        print("smFISH backend: GPU (LoG → Depth → Contrast → Raj → Moment)")
 
-        spots_exp, exp_threshold_used, img_log_exp, sum_intensities, radii, good_coords, bad_coords = \
-            detect_spots_gpu_full(
-                image_np=img_exp,
-                sigma=tuple(config["kernel_size"]),
-                min_distance=tuple(config["minimal_distance"]),
-                gaussian_radius=int(config.get("plot_spot_size", 2)),
-                gaussian_fit_fraction=float(config.get("gaussian_fit_fraction", 1.0)),
-                r2_threshold=float(config.get("r2_threshold", 0.4)),
-                random_seed=int(config.get("random_seed", 0)),
-                device=config.get("gpu_device", "cuda"),
-                voxel_size=tuple(config.get("voxel_size", (361, 75, 75))),
-                min_size_um=float(config.get("radius_for_spots", 200)),
-                diagnostic_folder=results_folder if config.get("save_diagnostics", True) else None
-            )
+        from functions.gpu_smfish_v2 import detect_spots_gpu
 
-    # ------------------------------
-    # CPU fallback (Big-FISH)
-    # ------------------------------
+        spots_exp, stats = detect_spots_gpu(
+            image_np=img_exp,
+            sigma=tuple(config["kernel_size"]),
+            min_distance=tuple(config.get("minimal_distance", (2, 4, 4))),
+            radius=int(config.get("plot_spot_size", 2)),
+            depth_percentile=float(config.get("depth_percentile", 99.5)),
+            min_contrast=float(config.get("min_contrast", 2.0)),
+            size_bounds=tuple(config.get("moment_size_bounds", (0.6, 3.0))),
+            aspect_ratio_max=float(config.get("aspect_ratio_max", 2.5)),
+            device=config.get("gpu_device", "cuda"),
+            diagnostics=results_folder if config.get("save_diagnostics", True) else None
+        )
+
+        # ------------------------------
+        # Per-step reporting
+        # ------------------------------
+        print("\n===== smFISH GPU QC =====")
+        for k in [
+            "n_minima",
+            "n_after_depth",
+            "n_after_contrast",
+            "n_after_raj",
+            "n_after_size",
+        ]:
+            if k in stats:
+                print(f"{k:>20s}: {stats[k]}")
+        print("========================\n")
+
+        exp_threshold_used = None
+        img_log_exp = None
+        sum_intensities = None
+        radii = None
+        good_coords = spots_exp
+        bad_coords = None
+
+    # ==========================================================
+    # CPU FALLBACK (Big-FISH)
+    # ==========================================================
     else:
-        from bigfish.stack import log_filter
-        from bigfish.detection import detect_spots as bf_detect_spots
         print("smFISH backend: Big-FISH CPU")
 
+        from bigfish.stack import log_filter
+        from bigfish.detection import detect_spots as bf_detect_spots
+
         threshold_to_use = config.get("experimentThreshold", None)
+
         spots_exp, exp_threshold_used = bf_detect_spots(
             images=img_exp,
             threshold=threshold_to_use,
@@ -293,43 +332,37 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
             log_kernel_size=config["kernel_size"],
             minimum_distance=config["minimal_distance"],
         )
+
         img_log_exp = log_filter(img_exp, config["kernel_size"])
 
-        # Optional radii computation
-        if compute_radii and len(spots_exp) > 0:
-            from .spot_detection import find_spots_around
-            sum_intensities, radii = [], []
-            for coord in spots_exp:
-                voxels = find_spots_around(coord, img_log_exp)
-                sum_intensities.append(np.sum(img_exp[tuple(voxels.T)]))
-                radii.append([
-                    voxels[:, 0].ptp() + 1,
-                    voxels[:, 1].ptp() + 1,
-                    voxels[:, 2].ptp() + 1
-                ])
-            sum_intensities = np.asarray(sum_intensities)
-            radii = np.asarray(radii)
-        good_coords, bad_coords = None, None
-
-    # ------------------------------
-    # Reporting
-    # ------------------------------
-    print(f"Detected {len(spots_exp)} experiment spots")
+        sum_intensities = None
+        radii = None
+        good_coords = spots_exp
+        bad_coords = None
 
     # ------------------------------
     # Save outputs
     # ------------------------------
-    imwrite(os.path.join(results_folder, "experiment_LoG_filtered.tif"), img_log_exp, photometric="minisblack")
     np.save(os.path.join(results_folder, "experiment_spots.npy"), spots_exp)
 
-    if compute_radii and sum_intensities is not None:
-        np.save(os.path.join(results_folder, "experiment_spot_intensity.npy"), sum_intensities)
-        np.save(os.path.join(results_folder, "experiment_spot_radii.npy"), radii)
+    if img_log_exp is not None:
+        imwrite(
+            os.path.join(results_folder, "experiment_LoG_filtered.tif"),
+            img_log_exp,
+            photometric="minisblack"
+        )
 
+    print(f"Detected {len(spots_exp)} experiment spots")
     print("Saved experiment results.")
 
-    return spots_exp, exp_threshold_used, img_log_exp, sum_intensities, radii, good_coords, bad_coords
-
-
+    return (
+        spots_exp,
+        exp_threshold_used,
+        img_log_exp,
+        sum_intensities,
+        radii,
+        good_coords,
+        bad_coords,
+    )
 
 

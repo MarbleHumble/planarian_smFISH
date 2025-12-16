@@ -42,3 +42,9 @@ plot_spot_size: 4
 results_folder: results
 use_gpu: True
 gpu_device: cuda
+
+# --- GPU v2 filtering ---
+depth_percentile: 99.5
+min_contrast: 2.0
+moment_size_bounds: [0.6, 3.0]
+aspect_ratio_max: 2.5
