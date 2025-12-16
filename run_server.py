@@ -20,8 +20,8 @@ import yaml
 from tifffile import imread, imwrite
 import numpy as np
 
-from detect_spots_from_config import detect_spots_from_config
-from spot_detection import control_peak_intensities, compute_control_threshold_from_peaks
+from functions.spot_detection import detect_spots_from_config
+from functions.spot_detection import control_peak_intensities, compute_control_threshold_from_peaks
 
 def main():
     # ------------------------------
