@@ -43,6 +43,12 @@ results_folder: results
 use_gpu: True
 gpu_device: cuda
 
+# --- Raj / intensity filtering (GPU) ---
+use_raj_plateau: true      # still use Raj, but relaxed
+raj_slope_thresh: 0.05     # more lenient than 0.02
+raj_smooth_window: 21      # smoother plateau
+
+
 # --- GPU v2 filtering ---
 depth_percentile: 99.5
 min_contrast: 2.0
