@@ -150,7 +150,12 @@ def detect_spots_gpu(
     size_bounds=(0.6, 3.0),
     aspect_ratio_max=2.5,
     device="cuda",
-    diagnostics=None
+    diagnostics=None,
+    # --- NEW CONFIGURABLE INTENSITY FILTERING OPTIONS ---
+    use_raj_plateau=True,
+    raj_slope_thresh=0.02,
+    raj_smooth_window=11,
+    intensity_percentile=None,
 ):
     """
     GPU smFISH detection with diagnostics.
@@ -190,9 +195,23 @@ def detect_spots_gpu(
     contrasts = contrasts[keep]
     stats["n_after_contrast"] = len(coords)
 
-    # 5. Raj plateau (intensity)
+    # 5. Raj plateau / intensity-based filtering
     intensities, moments = spot_statistics(image_np, coords, radius)
-    I_thresh, _ = raj_plateau_threshold(intensities)
+
+    if use_raj_plateau:
+        # Classic Raj plateau heuristic
+        I_thresh, _ = raj_plateau_threshold(
+            intensities,
+            smooth_window=raj_smooth_window,
+            slope_thresh=raj_slope_thresh,
+        )
+    elif intensity_percentile is not None:
+        # Simple percentile-based threshold on integrated intensity
+        I_thresh = np.percentile(intensities, intensity_percentile)
+    else:
+        # Skip intensity filtering entirely
+        I_thresh = intensities.min() - 1  # everything passes
+
     keep = intensities >= I_thresh
     coords = coords[keep]
     moments = moments[keep]

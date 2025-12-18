@@ -287,7 +287,16 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
             size_bounds=tuple(config.get("moment_size_bounds", (0.6, 3.0))),
             aspect_ratio_max=float(config.get("aspect_ratio_max", 2.5)),
             device=config.get("gpu_device", "cuda"),
-            diagnostics=results_folder if config.get("save_diagnostics", True) else None
+            diagnostics=results_folder if config.get("save_diagnostics", True) else None,
+            # --- Raj / intensity filtering options (GPU only) ---
+            use_raj_plateau=config.get("use_raj_plateau", True),
+            raj_slope_thresh=float(config.get("raj_slope_thresh", 0.02)),
+            raj_smooth_window=int(config.get("raj_smooth_window", 11)),
+            intensity_percentile=(
+                None
+                if config.get("intensity_percentile", None) is None
+                else float(config.get("intensity_percentile"))
+            ),
         )
 
         # ------------------------------
