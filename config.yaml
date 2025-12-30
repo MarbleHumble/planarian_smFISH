@@ -42,6 +42,11 @@ plot_spot_size: 4
 results_folder: results
 use_gpu: True
 gpu_device: cuda
+use_bigfish_protocol: True  # Use Big-FISH protocol replication (simple LoG + threshold)
+
+# --- Comparison with CPU Big-FISH results ---
+cpu_bigfish_results_path: "/scratch/qgs8612/spots_exp.npy"  # Path to CPU Big-FISH results for comparison
+comparison_tolerance: 3.0  # Pixel tolerance for spot matching
 
 # --- Raj / intensity filtering (GPU) ---
 use_raj_plateau: true      # still use Raj, but relaxed

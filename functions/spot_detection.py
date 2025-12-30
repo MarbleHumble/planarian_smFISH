@@ -270,56 +270,90 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
             use_gpu = False
 
     # ==========================================================
-    # GPU BACKEND (v2)
+    # GPU BACKEND
     # ==========================================================
     if use_gpu:
-        print("smFISH backend: GPU (LoG → Depth → Contrast → Raj → Moment)")
+        # Choose between Big-FISH protocol (simple) or advanced multi-stage filtering
+        use_bigfish_protocol = config.get("use_bigfish_protocol", True)  # Default to Big-FISH protocol
+        
+        if use_bigfish_protocol:
+            print("smFISH backend: GPU (Big-FISH protocol replication)")
+            
+            from functions.gpu_smfish_v2 import detect_spots_gpu_bigfish
+            from bigfish.stack import log_filter
+            
+            threshold_to_use = config.get("experimentThreshold", None)
+            
+            spots_exp, exp_threshold_used = detect_spots_gpu_bigfish(
+                image_np=img_exp,
+                sigma=tuple(config["kernel_size"]),
+                min_distance=tuple(config.get("minimal_distance", (2, 4, 4))),
+                threshold=threshold_to_use,
+                voxel_size=tuple(config.get("voxel_size", (1, 1, 1))),
+                spot_radius=tuple(config.get("spot_size", (1, 1, 1))),
+                device=config.get("gpu_device", "cuda"),
+                return_threshold=True,
+            )
+            
+            # Generate LoG image for saving (using Big-FISH's LoG for consistency)
+            img_log_exp = log_filter(img_exp, config["kernel_size"])
+            sum_intensities = None
+            radii = None
+            good_coords = spots_exp
+            bad_coords = None
+            
+            print(f"Big-FISH GPU protocol: Detected {len(spots_exp)} spots")
+            if exp_threshold_used is not None:
+                print(f"Threshold used: {exp_threshold_used:.4f}")
+        
+        else:
+            print("smFISH backend: GPU (LoG → Depth → Contrast → Raj → Moment)")
 
-        from functions.gpu_smfish_v2 import detect_spots_gpu
+            from functions.gpu_smfish_v2 import detect_spots_gpu
 
-        spots_exp, stats = detect_spots_gpu(
-            image_np=img_exp,
-            sigma=tuple(config["kernel_size"]),
-            min_distance=tuple(config.get("minimal_distance", (2, 4, 4))),
-            radius=int(config.get("plot_spot_size", 2)),
-            depth_percentile=float(config.get("depth_percentile", 99.5)),
-            min_contrast=float(config.get("min_contrast", 2.0)),
-            size_bounds=tuple(config.get("moment_size_bounds", (0.6, 3.0))),
-            aspect_ratio_max=float(config.get("aspect_ratio_max", 2.5)),
-            device=config.get("gpu_device", "cuda"),
-            diagnostics=results_folder if config.get("save_diagnostics", True) else None,
-            # --- Raj / intensity filtering options (GPU only) ---
-            use_raj_plateau=config.get("use_raj_plateau", True),
-            raj_slope_thresh=float(config.get("raj_slope_thresh", 0.02)),
-            raj_smooth_window=int(config.get("raj_smooth_window", 11)),
-            intensity_percentile=(
-                None
-                if config.get("intensity_percentile", None) is None
-                else float(config.get("intensity_percentile"))
-            ),
-        )
+            spots_exp, stats = detect_spots_gpu(
+                image_np=img_exp,
+                sigma=tuple(config["kernel_size"]),
+                min_distance=tuple(config.get("minimal_distance", (2, 4, 4))),
+                radius=int(config.get("plot_spot_size", 2)),
+                depth_percentile=float(config.get("depth_percentile", 99.5)),
+                min_contrast=float(config.get("min_contrast", 2.0)),
+                size_bounds=tuple(config.get("moment_size_bounds", (0.6, 3.0))),
+                aspect_ratio_max=float(config.get("aspect_ratio_max", 2.5)),
+                device=config.get("gpu_device", "cuda"),
+                diagnostics=results_folder if config.get("save_diagnostics", True) else None,
+                # --- Raj / intensity filtering options (GPU only) ---
+                use_raj_plateau=config.get("use_raj_plateau", True),
+                raj_slope_thresh=float(config.get("raj_slope_thresh", 0.02)),
+                raj_smooth_window=int(config.get("raj_smooth_window", 11)),
+                intensity_percentile=(
+                    None
+                    if config.get("intensity_percentile", None) is None
+                    else float(config.get("intensity_percentile"))
+                ),
+            )
 
-        # ------------------------------
-        # Per-step reporting
-        # ------------------------------
-        print("\n===== smFISH GPU QC =====")
-        for k in [
-            "n_minima",
-            "n_after_depth",
-            "n_after_contrast",
-            "n_after_raj",
-            "n_after_size",
-        ]:
-            if k in stats:
-                print(f"{k:>20s}: {stats[k]}")
-        print("========================\n")
+            # ------------------------------
+            # Per-step reporting
+            # ------------------------------
+            print("\n===== smFISH GPU QC =====")
+            for k in [
+                "n_minima",
+                "n_after_depth",
+                "n_after_contrast",
+                "n_after_raj",
+                "n_after_size",
+            ]:
+                if k in stats:
+                    print(f"{k:>20s}: {stats[k]}")
+            print("========================\n")
 
-        exp_threshold_used = None
-        img_log_exp = None
-        sum_intensities = None
-        radii = None
-        good_coords = spots_exp
-        bad_coords = None
+            exp_threshold_used = None
+            img_log_exp = None
+            sum_intensities = None
+            radii = None
+            good_coords = spots_exp
+            bad_coords = None
 
     # ==========================================================
     # CPU FALLBACK (Big-FISH)

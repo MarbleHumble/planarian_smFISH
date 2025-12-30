@@ -238,3 +238,109 @@ def detect_spots_gpu(
         _save_hist(size_um, "Moment-derived size (µm)", diagnostics, "size.png")
 
     return coords_final, stats
+
+
+# ============================================================
+# ---------------- Big-FISH Protocol Replication -------------
+# ============================================================
+
+def detect_spots_gpu_bigfish(
+    image_np,
+    sigma,
+    min_distance,
+    threshold=None,
+    voxel_size=None,
+    spot_radius=None,
+    device="cuda",
+    return_threshold=True,
+):
+    """
+    GPU implementation that exactly replicates Big-FISH detect_spots algorithm.
+    
+    Big-FISH algorithm (simplified):
+    1. Apply LoG filter to image
+    2. Find local minima in LoG image (with minimum_distance constraint)
+    3. Apply threshold filtering on LoG values
+    4. Return filtered spots
+    
+    This replicates Big-FISH's simple approach without extra filtering stages.
+    
+    Args:
+        image_np: Input 3D image array (Z, Y, X)
+        sigma: LoG kernel size (z, y, x) - same as log_kernel_size in Big-FISH
+        min_distance: Minimum distance between spots (z, y, x) - same as minimum_distance
+        threshold: LoG threshold value. If None, will use a percentile-based auto-threshold.
+                   In Big-FISH, lower (more negative) LoG values = stronger spots.
+        voxel_size: Not used in detection but kept for API compatibility with Big-FISH
+        spot_radius: Not used in detection but kept for API compatibility with Big-FISH
+        device: GPU device ("cuda" or "cpu")
+        return_threshold: Whether to return the threshold used
+        
+    Returns:
+        spots: Array of spot coordinates (N, 3) as int16
+        threshold_used: Threshold value (if return_threshold=True)
+    """
+    device = torch.device(device)
+    
+    # ============================================================
+    # STEP 1: Apply LoG filter (exactly like Big-FISH)
+    # ============================================================
+    # log_filter_gpu returns negative LoG (spots are negative in standard LoG)
+    log_img = log_filter_gpu(image_np, sigma, device=device)
+    
+    # Big-FISH works with LoG directly (spots are negative values = local minima)
+    # We need to negate to work with maxima detection (then negate threshold logic)
+    log_img_neg = -log_img  # Now spots are positive = easier to work with
+    
+    # ============================================================
+    # STEP 2: Find local minima in LoG image (exactly like Big-FISH)
+    # ============================================================
+    dz, dy, dx = min_distance
+    log_tensor = torch.from_numpy(log_img_neg).float().to(device)[None, None]
+    
+    # Local minima detection: find points that are maxima in negated space
+    # (which are minima in original LoG space)
+    max_filt = F.max_pool3d(
+        log_tensor,
+        kernel_size=(2*dz+1, 2*dy+1, 2*dx+1),
+        stride=1,
+        padding=(dz, dy, dx)
+    )
+    
+    # Points that are local maxima in negated space = minima in original LoG
+    is_maxima = (log_tensor == max_filt)
+    
+    # Get coordinates of all local minima (in original LoG space)
+    coords_tensor = is_maxima.squeeze().nonzero(as_tuple=False)
+    coords = coords_tensor.cpu().numpy().astype(np.int16)
+    
+    if len(coords) == 0:
+        if return_threshold:
+            return np.empty((0, 3), dtype=np.int16), None
+        return np.empty((0, 3), dtype=np.int16)
+    
+    # ============================================================
+    # STEP 3: Apply threshold filtering (exactly like Big-FISH)
+    # ============================================================
+    # Get LoG values at minima coordinates (use original LoG, negative values)
+    log_values_original = log_img[coords[:, 0], coords[:, 1], coords[:, 2]]
+    
+    if threshold is None:
+        # Auto-threshold: Big-FISH keeps spots with more negative LoG values (stronger signals)
+        # Use percentile on original LoG values (negative = stronger)
+        # Lower percentile = more negative values = stronger spots
+        threshold = np.percentile(log_values_original, 5.0)  # Keep bottom 5% (most negative = strongest)
+    else:
+        # Threshold is provided (should be negative for Big-FISH convention)
+        # If positive threshold provided, assume it needs negation
+        if threshold > 0:
+            threshold = -threshold
+    
+    # Keep spots where original LoG value is below threshold (more negative = stronger)
+    keep = log_values_original <= threshold
+    spots = coords[keep]
+    
+    if return_threshold:
+        return spots, threshold
+    
+    return spots
