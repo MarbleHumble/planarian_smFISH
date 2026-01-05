@@ -10,8 +10,8 @@ smFISHChannelPath: "/scratch/qgs8612/worm1/565/Image1_565.tif"
 # Spot detection
 controlThreshold: null
 experimentThreshold: null
-minimal_distance: [3, 3, 3]
-kernel_size: [1, 1.7, 1.7]
+minimal_distance: [2, 2, 2]
+kernel_size: [1, 1.5, 1.5]
 control_voxel_size: [361, 75, 75]
 voxel_size: [361, 75, 75]
 spot_size: [600, 300, 300]

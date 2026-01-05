@@ -307,53 +307,53 @@ def detect_spots_from_config(config, img_path=None, results_folder=None):
                 print(f"Threshold used: {exp_threshold_used:.4f}")
         
         else:
-            print("smFISH backend: GPU (LoG → Depth → Contrast → Raj → Moment)")
+        print("smFISH backend: GPU (LoG → Depth → Contrast → Raj → Moment)")
 
-            from functions.gpu_smfish_v2 import detect_spots_gpu
+        from functions.gpu_smfish_v2 import detect_spots_gpu
 
-            spots_exp, stats = detect_spots_gpu(
-                image_np=img_exp,
-                sigma=tuple(config["kernel_size"]),
-                min_distance=tuple(config.get("minimal_distance", (2, 4, 4))),
-                radius=int(config.get("plot_spot_size", 2)),
-                depth_percentile=float(config.get("depth_percentile", 99.5)),
-                min_contrast=float(config.get("min_contrast", 2.0)),
-                size_bounds=tuple(config.get("moment_size_bounds", (0.6, 3.0))),
-                aspect_ratio_max=float(config.get("aspect_ratio_max", 2.5)),
-                device=config.get("gpu_device", "cuda"),
-                diagnostics=results_folder if config.get("save_diagnostics", True) else None,
-                # --- Raj / intensity filtering options (GPU only) ---
-                use_raj_plateau=config.get("use_raj_plateau", True),
-                raj_slope_thresh=float(config.get("raj_slope_thresh", 0.02)),
-                raj_smooth_window=int(config.get("raj_smooth_window", 11)),
-                intensity_percentile=(
-                    None
-                    if config.get("intensity_percentile", None) is None
-                    else float(config.get("intensity_percentile"))
-                ),
-            )
+        spots_exp, stats = detect_spots_gpu(
+            image_np=img_exp,
+            sigma=tuple(config["kernel_size"]),
+            min_distance=tuple(config.get("minimal_distance", (2, 4, 4))),
+            radius=int(config.get("plot_spot_size", 2)),
+            depth_percentile=float(config.get("depth_percentile", 99.5)),
+            min_contrast=float(config.get("min_contrast", 2.0)),
+            size_bounds=tuple(config.get("moment_size_bounds", (0.6, 3.0))),
+            aspect_ratio_max=float(config.get("aspect_ratio_max", 2.5)),
+            device=config.get("gpu_device", "cuda"),
+            diagnostics=results_folder if config.get("save_diagnostics", True) else None,
+            # --- Raj / intensity filtering options (GPU only) ---
+            use_raj_plateau=config.get("use_raj_plateau", True),
+            raj_slope_thresh=float(config.get("raj_slope_thresh", 0.02)),
+            raj_smooth_window=int(config.get("raj_smooth_window", 11)),
+            intensity_percentile=(
+                None
+                if config.get("intensity_percentile", None) is None
+                else float(config.get("intensity_percentile"))
+            ),
+        )
 
-            # ------------------------------
-            # Per-step reporting
-            # ------------------------------
-            print("\n===== smFISH GPU QC =====")
-            for k in [
-                "n_minima",
-                "n_after_depth",
-                "n_after_contrast",
-                "n_after_raj",
-                "n_after_size",
-            ]:
-                if k in stats:
-                    print(f"{k:>20s}: {stats[k]}")
-            print("========================\n")
+        # ------------------------------
+        # Per-step reporting
+        # ------------------------------
+        print("\n===== smFISH GPU QC =====")
+        for k in [
+            "n_minima",
+            "n_after_depth",
+            "n_after_contrast",
+            "n_after_raj",
+            "n_after_size",
+        ]:
+            if k in stats:
+                print(f"{k:>20s}: {stats[k]}")
+        print("========================\n")
 
-            exp_threshold_used = None
-            img_log_exp = None
-            sum_intensities = None
-            radii = None
-            good_coords = spots_exp
-            bad_coords = None
+        exp_threshold_used = None
+        img_log_exp = None
+        sum_intensities = None
+        radii = None
+        good_coords = spots_exp
+        bad_coords = None
 
     # ==========================================================
     # CPU FALLBACK (Big-FISH)
